@@ -1,0 +1,15 @@
+[package]
+name = "spideroxide-native"
+version = "0.1.0"
+edition = "2024"
+description = "Native request-processing backend for SpiderOxide"
+license = "MIT"
+
+[lib]
+name = "_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.25", features = ["extension-module"] }
+sha2 = "0.10"
+url = "2.5"

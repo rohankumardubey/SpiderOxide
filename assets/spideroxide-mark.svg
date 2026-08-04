@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">SpiderOxide mark</title>
+  <desc id="description">A rust-orange geometric spider on a dark hexagonal web.</desc>
+  <defs>
+    <linearGradient id="oxide" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a4c"/>
+      <stop offset=".48" stop-color="#e54b2a"/>
+      <stop offset="1" stop-color="#8f1d14"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#26394a"/>
+      <stop offset="1" stop-color="#111a24"/>
+    </linearGradient>
+  </defs>
+  <path d="M128 8 232 68v120l-104 60-104-60V68Z" fill="url(#steel)"/>
+  <path d="M128 24 218 76v104l-90 52-90-52V76Z" fill="none" stroke="#476176" stroke-width="2"/>
+  <g fill="none" stroke="#7890a3" stroke-linecap="round" opacity=".7">
+    <path d="M128 24v208M38 76l180 104M218 76 38 180"/>
+    <path d="M80 51c29 27 67 27 96 0M52 94c49 15 103 15 152 0M52 162c49-15 103-15 152 0M80 205c29-27 67-27 96 0"/>
+  </g>
+  <g fill="url(#oxide)" stroke="#ffad72" stroke-width="2.5" stroke-linejoin="round">
+    <path d="M128 74c-18 0-30 13-30 28 0 11 6 21 15 26-14 7-24 22-24 39 0 26 17 45 39 45s39-19 39-45c0-17-10-32-24-39 9-5 15-15 15-26 0-15-12-28-30-28Z"/>
+    <path d="M100 117 67 94l-21 2 17 10 26 30M156 117l33-23 21 2-17 10-26 30M94 142l-41-9-18 9 20 2 35 18M162 142l41-9 18 9-20 2-35 18M93 168l-38 13-12 17 20-8 32-2M163 168l38 13 12 17-20-8-32-2"/>
+  </g>
+  <circle cx="118" cy="99" r="3.5" fill="#fff4eb"/>
+  <circle cx="138" cy="99" r="3.5" fill="#fff4eb"/>
+</svg>

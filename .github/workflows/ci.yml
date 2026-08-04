@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Set up stable Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Install development tools
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements.txt
+
+      - name: Check Python formatting
+        run: .venv/bin/python -m ruff format --check .
+
+      - name: Lint Python
+        run: .venv/bin/python -m ruff check .
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path rust_impl/Cargo.toml -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --manifest-path rust_impl/Cargo.toml --release -- -D warnings
+
+      - name: Build editable release extension
+        run: .venv/bin/maturin develop --release
+
+      - name: Verify integration facade
+        run: .venv/bin/python benchmark/verify_integration.py
+
+      - name: Verify implementation parity
+        run: .venv/bin/python benchmark/verify_correctness.py
+
+      - name: Verify crawler foundation
+        run: .venv/bin/python benchmark/verify_crawler.py
+
+      - name: Smoke-test Scrapy comparison
+        run: |
+          .venv/bin/python -m pip install "Scrapy>=2.17,<3"
+          .venv/bin/python benchmark/benchmark_scrapy.py \
+            --sizes 100 --warmups 1 --runs 2 --output-dir /tmp/scrapy-comparison
+
+      - name: Build release wheel
+        run: .venv/bin/maturin build --release --out dist
+
+      - name: Verify wheel contents
+        run: |
+          .venv/bin/python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheel = next(Path("dist").glob("*.whl"))
+          with ZipFile(wheel) as archive:
+              names = archive.namelist()
+
+          assert not any("__pycache__" in name for name in names)
+          assert not any(name.endswith((".pyc", ".pyo")) for name in names)
+          assert not any(name.startswith("rust_impl/") for name in names)
+          assert "spideroxide/py.typed" in names
+          PY
+
+      - name: Smoke-test installed wheel outside checkout
+        run: |
+          python -m venv .wheel-venv
+          .wheel-venv/bin/python -m pip install dist/*.whl
+          cd /tmp
+          "$GITHUB_WORKSPACE/.wheel-venv/bin/python" -c \
+            "import spideroxide; assert spideroxide.resolve_backend('rust').name == 'rust'"

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+.wheel-venv/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Rust
+rust_impl/target/
+
+# Build artifacts
+build/
+dist/
+target/
+*.egg-info/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Generated benchmark scratch data
+*.prof
+*.trace

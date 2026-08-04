@@ -1,0 +1,67 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "spideroxide"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "An asynchronous Python crawler framework with optional Rust acceleration"
+readme = "README.md"
+license = "MIT"
+keywords = ["crawler", "asyncio", "rust", "pyo3", "scrapy", "scheduler"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Rust",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries",
+]
+dependencies = [
+    "httpx>=0.27,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "maturin>=1.7,<2",
+    "ruff>=0.9,<1",
+]
+benchmark = [
+    "Scrapy>=2.17,<3",
+]
+
+[tool.maturin]
+manifest-path = "rust_impl/Cargo.toml"
+python-source = "."
+python-packages = ["spideroxide"]
+module-name = "spideroxide._native"
+exclude = [
+    { path = "rust_impl/Cargo.lock", format = "wheel" },
+    { path = "rust_impl/Cargo.toml", format = "wheel" },
+    { path = "rust_impl/src/**", format = "wheel" },
+    { path = "rust_impl/target/**", format = "wheel" },
+    { path = "spideroxide/**/__pycache__/**", format = "wheel" },
+    { path = "spideroxide/**/*.pyc", format = "wheel" },
+    { path = "spideroxide/**/*.pyo", format = "wheel" },
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"benchmark/common.py" = ["E402"]
+"benchmark/memory_worker.py" = ["E402"]
+"benchmark/verify_correctness.py" = ["E402"]
+"benchmark/verify_crawler.py" = ["E402"]
+"benchmark/verify_integration.py" = ["E402"]
+"benchmark/benchmark_scrapy.py" = ["E402"]

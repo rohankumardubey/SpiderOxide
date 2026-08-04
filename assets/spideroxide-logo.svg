@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="280" viewBox="0 0 960 280" role="img" aria-labelledby="title description">
+  <title id="title">SpiderOxide</title>
+  <desc id="description">A geometric spider and web mark beside the SpiderOxide wordmark.</desc>
+  <defs>
+    <linearGradient id="oxide" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a4c"/>
+      <stop offset="0.48" stop-color="#e54b2a"/>
+      <stop offset="1" stop-color="#8f1d14"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#26394a"/>
+      <stop offset="1" stop-color="#111a24"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#111a24" flood-opacity=".22"/>
+    </filter>
+  </defs>
+
+  <rect x="4" y="4" width="952" height="272" rx="28" fill="#f8fafc" stroke="#d6dee5" stroke-width="2"/>
+
+  <g transform="translate(28 18)" filter="url(#shadow)">
+    <path d="M122 8 222 65v114l-100 57L22 179V65Z" fill="url(#steel)"/>
+    <path d="M122 22 209 72v100l-87 50-87-50V72Z" fill="none" stroke="#476176" stroke-width="2"/>
+
+    <g fill="none" stroke="#7890a3" stroke-linecap="round" opacity=".72">
+      <path d="M122 22v200M35 72l174 100M209 72 35 172"/>
+      <path d="M76 48c28 26 64 26 92 0M48 89c48 15 100 15 148 0M48 155c48-15 100-15 148 0M76 196c28-26 64-26 92 0"/>
+      <path d="M76 48c-7 35-7 67 0 100 7 28 22 51 46 74M168 48c7 35 7 67 0 100-7 28-22 51-46 74"/>
+    </g>
+
+    <g fill="url(#oxide)" stroke="#ffad72" stroke-width="2.5" stroke-linejoin="round">
+      <path d="M122 74c-17 0-29 12-29 27 0 11 6 20 15 25-14 7-23 21-23 38 0 25 16 43 37 43s37-18 37-43c0-17-9-31-23-38 9-5 15-14 15-25 0-15-12-27-29-27Z"/>
+      <path d="m94 116-32-22-20 2 16 10 25 29M150 116l32-22 20 2-16 10-25 29M88 140l-39-9-18 9 20 1 33 18M156 140l39-9 18 9-20 1-33 18M87 165l-36 13-12 16 19-8 31-2M157 165l36 13 12 16-19-8-31-2"/>
+    </g>
+    <circle cx="112" cy="98" r="3.5" fill="#fff4eb"/>
+    <circle cx="132" cy="98" r="3.5" fill="#fff4eb"/>
+  </g>
+
+  <g transform="translate(286 78)">
+    <text x="0" y="70" fill="#182532" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="76" font-weight="800" letter-spacing="-3">Spider</text>
+    <text x="252" y="70" fill="url(#oxide)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="76" font-weight="800" letter-spacing="-3">Oxide</text>
+    <path d="M3 96h535" stroke="#d6dee5" stroke-width="2"/>
+    <text x="3" y="130" fill="#526779" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" font-weight="600" letter-spacing="3">MEASURED SPEED. SAFE MIGRATION.</text>
+  </g>
+</svg>
