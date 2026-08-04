@@ -37,6 +37,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Runtime selection of the Python or Rust backend
 * Preservation of the original Python request object
 * Concurrent asynchronous crawl engine
+* Native Tokio crawl coordination with bounded start-request admission
 * Downloader and spider middleware
 * Item pipelines, signals, settings, and crawl statistics
 * Streaming HTTP downloads with repeated header support
@@ -107,6 +108,27 @@ automatic decompression, and the same timeout, response-size, redirect, header, 
 contracts as the Python downloader. Use `auto` to prefer Rust and fall back to HTTPX when the native
 extension is unavailable.
 
+The Python crawl engine is also the default. The native engine moves priority scheduling, duplicate
+filtering, concurrency admission, worker wakeups, start-request backpressure, and idle detection into
+Rust. Spider callbacks, middleware, pipelines, signals, and item objects remain in Python.
+
+Select the complete native runtime explicitly:
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "DOWNLOADER_BACKEND": "rust",
+        },
+    ).crawl()
+)
+```
+
+`ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
+requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
+
 ## Request processing
 
 SpiderOxide accepts any request object with `url`, `method`, `body`, and `priority` attributes.
@@ -163,6 +185,8 @@ The validation suite compares:
 * callback and errback handling
 * native HTTP methods, bodies, repeated headers, and cookies
 * native redirects, compression, streaming, timeouts, and response limits
+* native priority ordering, duplicate decisions, and request identity
+* native concurrency, backpressure, streaming starts, cancellation, and cleanup
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -173,6 +197,7 @@ Run it with:
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
 python benchmark/verify_native_downloader.py
+python benchmark/verify_native_engine.py
 ```
 
 The standard validation uses 10,000 deterministic requests with a fixed random seed.
@@ -297,11 +322,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements.
 SpiderOxide is experimental and does not yet provide full Scrapy compatibility. State is kept in
 memory, and the URL canonicalizer intentionally implements a smaller contract than Scrapy.
 
-The current foundation includes the crawl engine, HTTP models, HTTP downloader, spiders,
-middleware, item pipelines, signals, settings, stats, duplicate filtering, and scheduling. It does
-not yet include selector APIs, persistent job state, feed exports, extensions, robots handling,
-retry and redirect policies, proxy support, throttling, request depth policies, or Scrapy
-command-line compatibility.
+The current foundation includes Python and Rust crawl coordination, HTTP models, Python and Rust
+HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
+filtering, and scheduling. It does not yet include selector APIs, persistent job state, feed
+exports, extensions, robots handling, retry policies, proxy support, throttling, request depth
+policies, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, retries, and concurrency.

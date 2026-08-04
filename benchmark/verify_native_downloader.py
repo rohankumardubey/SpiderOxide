@@ -15,6 +15,7 @@ from spideroxide import (
     Crawler,
     DownloadError,
     Headers,
+    NativeCrawlEngine,
     Request,
     RustDownloader,
     Settings,
@@ -240,10 +241,16 @@ async def _verify() -> None:
             def parse(self, response: TextResponse) -> dict[str, bool]:
                 return response.json()
 
-        crawler = Crawler(NativeSpider, {"DOWNLOADER_BACKEND": "rust"})
+        crawler = Crawler(
+            NativeSpider,
+            {
+                "DOWNLOADER_BACKEND": "rust",
+                "ENGINE_BACKEND": "rust",
+            },
+        )
         result = await crawler.crawl()
         assert result.items == ({"compressed": True},)
-        assert crawler.engine is not None
+        assert isinstance(crawler.engine, NativeCrawlEngine)
         assert isinstance(crawler.engine.downloader, RustDownloader)
     finally:
         server.close()

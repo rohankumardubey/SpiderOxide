@@ -13,6 +13,8 @@ PRIORITIES = {
 
 DEFAULT_SETTINGS: dict[str, object] = {
     "CONCURRENT_REQUESTS": 16,
+    "ENGINE_BACKEND": "python",
+    "ENGINE_MAX_PENDING": 0,
     "DOWNLOAD_TIMEOUT": 180.0,
     "DOWNLOAD_MAXSIZE": 0,
     "DOWNLOADER_BACKEND": "python",

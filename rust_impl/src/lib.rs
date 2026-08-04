@@ -2,8 +2,10 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 
 mod downloader;
+mod engine;
 
 use downloader::{NativeHttpClient, NativeHttpResponse};
+use engine::NativeCrawlCoordinator;
 use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
@@ -307,6 +309,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     module.add_class::<NativeHttpClient>()?;
     module.add_class::<NativeHttpResponse>()?;
+    module.add_class::<NativeCrawlCoordinator>()?;
     module.add_class::<Request>()?;
     module.add_class::<RustDupeFilter>()?;
     module.add_class::<RustScheduler>()?;
