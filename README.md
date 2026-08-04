@@ -40,6 +40,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Downloader and spider middleware
 * Item pipelines, signals, settings, and crawl statistics
 * Streaming HTTP downloads with repeated header support
+* Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
 * Safe Rust with no unsafe blocks
 
 ## Installation
@@ -89,6 +90,22 @@ print(result.stats)
 
 `Spider.start()` may also be implemented as an asynchronous generator. Requests begin downloading
 as they are yielded, so startup does not need to finish before callbacks run.
+
+The HTTPX downloader is the default. Select the native Rust downloader explicitly:
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={"DOWNLOADER_BACKEND": "rust"},
+    ).crawl()
+)
+```
+
+The native downloader uses a shared Reqwest connection pool, Rustls, streamed response bodies,
+automatic decompression, and the same timeout, response-size, redirect, header, cookie, and response
+contracts as the Python downloader. Use `auto` to prefer Rust and fall back to HTTPX when the native
+extension is unavailable.
 
 ## Request processing
 
@@ -144,6 +161,8 @@ The validation suite compares:
 * asynchronous spider lifecycle and cleanup
 * middleware and item pipeline behavior
 * callback and errback handling
+* native HTTP methods, bodies, repeated headers, and cookies
+* native redirects, compression, streaming, timeouts, and response limits
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -153,6 +172,7 @@ Run it with:
 ```bash
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_native_downloader.py
 ```
 
 The standard validation uses 10,000 deterministic requests with a fixed random seed.
@@ -267,6 +287,7 @@ maturin develop -r
 python benchmark/verify_integration.py
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_native_downloader.py
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements.
@@ -279,8 +300,8 @@ memory, and the URL canonicalizer intentionally implements a smaller contract th
 The current foundation includes the crawl engine, HTTP models, HTTP downloader, spiders,
 middleware, item pipelines, signals, settings, stats, duplicate filtering, and scheduling. It does
 not yet include selector APIs, persistent job state, feed exports, extensions, robots handling,
-retry and redirect policies, cookie jars, proxy support, throttling, request depth policies, or
-Scrapy command-line compatibility.
+retry and redirect policies, proxy support, throttling, request depth policies, or Scrapy
+command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, retries, and concurrency.

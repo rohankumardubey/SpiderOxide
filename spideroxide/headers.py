@@ -68,6 +68,9 @@ class Headers(MutableMapping[str, bytes]):
             for value in values
         ]
 
+    def to_raw_pairs(self) -> list[tuple[str, bytes]]:
+        return [(name, value) for name, values in self._values.values() for value in values]
+
     def copy(self) -> Headers:
         copied = Headers()
         for name, values in self._values.values():

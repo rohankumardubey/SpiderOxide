@@ -1,11 +1,16 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 
+mod downloader;
+
+use downloader::{NativeHttpClient, NativeHttpResponse};
 use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
 use sha2::{Digest, Sha256};
 use url::{Url, form_urlencoded};
+
+pyo3::create_exception!(_native, NativeDownloadError, pyo3::exceptions::PyException);
 
 type RequestTuple = (String, String, Vec<u8>, i64);
 
@@ -296,6 +301,12 @@ impl RustScheduler {
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_batch, module)?)?;
+    module.add(
+        "NativeDownloadError",
+        module.py().get_type::<NativeDownloadError>(),
+    )?;
+    module.add_class::<NativeHttpClient>()?;
+    module.add_class::<NativeHttpResponse>()?;
     module.add_class::<Request>()?;
     module.add_class::<RustDupeFilter>()?;
     module.add_class::<RustScheduler>()?;
