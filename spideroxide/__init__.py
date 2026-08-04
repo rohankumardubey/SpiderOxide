@@ -16,7 +16,7 @@ from .backend import (
     resolve_backend,
 )
 from .crawler import Crawler, CrawlerRunner
-from .downloader import Downloader, HttpxDownloader
+from .downloader import Downloader, HttpxDownloader, RustDownloader
 from .engine import CrawlResult
 from .exceptions import (
     CloseSpider,
@@ -55,6 +55,7 @@ __all__ = [
     "Request",
     "RequestData",
     "Response",
+    "RustDownloader",
     "ScheduledRequest",
     "Scheduler",
     "Settings",

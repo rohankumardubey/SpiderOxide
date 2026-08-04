@@ -15,6 +15,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "CONCURRENT_REQUESTS": 16,
     "DOWNLOAD_TIMEOUT": 180.0,
     "DOWNLOAD_MAXSIZE": 0,
+    "DOWNLOADER_BACKEND": "python",
     "USER_AGENT": "SpiderOxide/0.1",
     "DOWNLOADER_MIDDLEWARES": [],
     "SPIDER_MIDDLEWARES": [],

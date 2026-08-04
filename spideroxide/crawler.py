@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .downloader import Downloader, HttpxDownloader
+from .downloader import Downloader, create_downloader
 from .engine import CrawlEngine, CrawlResult
 from .settings import Settings
 from .signals import SignalManager
@@ -33,7 +33,7 @@ class Crawler:
             raise RuntimeError("Crawler instances cannot be reused")
         self.spider = self.spider_cls.from_crawler(self, *args, **kwargs)
         self.settings.freeze()
-        downloader = self.downloader or HttpxDownloader(self.settings)
+        downloader = self.downloader or create_downloader(self.settings)
         self.engine = CrawlEngine(self, self.spider, downloader)
         return await self.engine.crawl()
 
