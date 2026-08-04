@@ -351,14 +351,14 @@ async def _verify_signal_ordering() -> None:
 
     class SignalDownloader(RecordingDownloader):
         async def fetch(self, request: Request) -> Response:
-            events.append("fetch")
+            events.append(f"fetch:{request.url}")
             return await super().fetch(request)
 
     async def scheduled(request: Request, spider: Spider) -> None:
         assert spider.name == "native-concurrency"
-        events.append("signal-start")
+        events.append(f"signal-start:{request.url}")
         await asyncio.sleep(0.01)
-        events.append("signal-end")
+        events.append(f"signal-end:{request.url}")
 
     downloader = SignalDownloader()
     crawler = Crawler(
@@ -371,7 +371,8 @@ async def _verify_signal_ordering() -> None:
     )
     crawler.signals.connect(scheduled, signals.request_scheduled)
     await crawler.crawl()
-    assert events[:3] == ["signal-start", "signal-end", "fetch"]
+    for request in downloader.history:
+        assert events.index(f"signal-end:{request.url}") < events.index(f"fetch:{request.url}")
 
 
 async def _verify() -> None:
