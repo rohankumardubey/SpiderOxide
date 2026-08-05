@@ -12,6 +12,7 @@ crate-type = ["cdylib"]
 [dependencies]
 async-compression = { version = "0.4", features = ["brotli", "gzip", "tokio", "zlib", "zstd"] }
 futures-util = "0.3"
+num-bigint = "0.4"
 pyo3 = { version = "0.25", features = ["extension-module"] }
 pyo3-async-runtimes = { version = "0.25", features = ["tokio-runtime"] }
 reqwest = { version = "0.12", default-features = false, features = [
@@ -22,6 +23,6 @@ reqwest = { version = "0.12", default-features = false, features = [
     "system-proxy",
 ] }
 sha2 = "0.10"
-tokio = { version = "1", features = ["io-util", "time"] }
+tokio = { version = "1", features = ["io-util", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["io"] }
 url = "2.5"

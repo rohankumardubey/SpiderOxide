@@ -4,11 +4,12 @@ from collections.abc import Mapping
 from typing import Any
 
 from .downloader import Downloader, create_downloader
-from .engine import CrawlEngine, CrawlResult
+from .engine import CrawlEngine, CrawlResult, create_engine
 from .settings import Settings
 from .signals import SignalManager
 from .spider import Spider
 from .stats import StatsCollector
+from .utils import maybe_await
 
 
 class Crawler:
@@ -34,7 +35,19 @@ class Crawler:
         self.spider = self.spider_cls.from_crawler(self, *args, **kwargs)
         self.settings.freeze()
         downloader = self.downloader or create_downloader(self.settings)
-        self.engine = CrawlEngine(self, self.spider, downloader)
+        try:
+            self.engine = create_engine(self, self.spider, downloader)
+        except BaseException:
+            close = getattr(downloader, "close", None)
+            if close is not None:
+                try:
+                    await maybe_await(close())
+                except Exception:
+                    self.stats.inc_value("teardown_errors/count")
+                    self.spider.logger.exception(
+                        "Error closing downloader after engine construction failed"
+                    )
+            raise
         return await self.engine.crawl()
 
 

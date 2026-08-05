@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from . import signals
 from .api import Scheduler
+from .backend import BackendUnavailableError
 from .downloader import Downloader
 from .exceptions import CloseSpider, DropItem, IgnoreRequest
 from .http import Request, Response
@@ -33,6 +34,8 @@ class _StartFailure:
 
 
 class CrawlEngine:
+    backend_name = "python"
+
     def __init__(self, crawler: object, spider: Spider, downloader: Downloader) -> None:
         self.crawler = crawler
         self.spider = spider
@@ -126,26 +129,29 @@ class CrawlEngine:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
 
-            self.stats.set_value("finish_time", asyncio.get_running_loop().time())
-            self.stats.set_value("finish_reason", reason)
-            close = getattr(self.downloader, "close", None)
-            if close is not None:
-                await self._safe_teardown("downloader/close", close)
-            if spider_opened:
-                await self._safe_teardown("spider/closed", self.spider.closed, reason)
-                await self._safe_teardown(
-                    "signal/spider_closed",
-                    self.signals.send,
-                    signals.spider_closed,
-                    spider=self.spider,
-                    reason=reason,
-                )
-            await self._safe_teardown(
-                "signal/engine_stopped",
-                self.signals.send,
-                signals.engine_stopped,
-            )
+            await self._finish(reason, spider_opened)
         return CrawlResult(reason, tuple(self.items), dict(self.stats.get_stats()))
+
+    async def _finish(self, reason: str, spider_opened: bool) -> None:
+        self.stats.set_value("finish_time", asyncio.get_running_loop().time())
+        self.stats.set_value("finish_reason", reason)
+        close = getattr(self.downloader, "close", None)
+        if close is not None:
+            await self._safe_teardown("downloader/close", close)
+        if spider_opened:
+            await self._safe_teardown("spider/closed", self.spider.closed, reason)
+            await self._safe_teardown(
+                "signal/spider_closed",
+                self.signals.send,
+                signals.spider_closed,
+                spider=self.spider,
+                reason=reason,
+            )
+        await self._safe_teardown(
+            "signal/engine_stopped",
+            self.signals.send,
+            signals.engine_stopped,
+        )
 
     async def _produce_start_requests(
         self,
@@ -286,3 +292,132 @@ class CrawlEngine:
             self.items.append(item)
             self.stats.inc_value("item_scraped_count")
             await self.signals.send(signals.item_scraped, item=item, spider=self.spider)
+
+
+class NativeCrawlEngine(CrawlEngine):
+    backend_name = "rust"
+
+    def __init__(self, crawler: object, spider: Spider, downloader: Downloader) -> None:
+        settings: Settings = crawler.settings  # type: ignore[attr-defined]
+        concurrency = settings.getint("CONCURRENT_REQUESTS", 16)
+        if concurrency < 1:
+            raise ValueError("CONCURRENT_REQUESTS must be at least 1")
+        pending_limit = settings.getint(
+            "ENGINE_MAX_PENDING",
+            concurrency * 2,
+        )
+        if pending_limit < 0:
+            raise ValueError("ENGINE_MAX_PENDING cannot be negative")
+        if pending_limit == 0:
+            pending_limit = concurrency * 2
+        try:
+            from ._native import NativeCrawlCoordinator
+        except ImportError as error:
+            raise BackendUnavailableError(
+                "Rust engine requested but the extension is unavailable; "
+                "run `maturin develop --release` or select the Python engine"
+            ) from error
+        coordinator = NativeCrawlCoordinator(concurrency, pending_limit)
+        super().__init__(crawler, spider, downloader)
+        self.scheduler = coordinator
+        self._requests: dict[int, Request] = {}
+
+    async def crawl(self) -> CrawlResult:
+        tasks: set[asyncio.Task[None]] = set()
+        spider_opened = False
+        reason = "finished"
+        try:
+            self.stats.set_value("start_time", asyncio.get_running_loop().time())
+            await self.signals.send(signals.engine_started)
+            await self.signals.send(signals.spider_opened, spider=self.spider)
+            spider_opened = True
+
+            tasks = {asyncio.create_task(self._worker()) for _ in range(self.concurrent_requests)}
+            tasks.add(asyncio.create_task(self._produce_native_start_requests()))
+            await asyncio.gather(*tasks)
+        except CloseSpider as exception:
+            reason = exception.reason
+        except asyncio.CancelledError:
+            reason = "cancelled"
+            raise
+        except BaseException:
+            reason = "error"
+            raise
+        finally:
+            self.scheduler.abort()
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._requests.clear()
+            await self._finish(reason, spider_opened)
+        return CrawlResult(reason, tuple(self.items), dict(self.stats.get_stats()))
+
+    async def _produce_native_start_requests(self) -> None:
+        try:
+            async for request in self.spider.start():
+                if not isinstance(request, Request):
+                    raise TypeError("Spider.start() must yield Request objects")
+                if not await self.scheduler.wait_for_pending_slot():
+                    return
+                await self._schedule(request)
+        finally:
+            self.scheduler.close_input()
+
+    async def _worker(self) -> None:
+        while (request_id := await self.scheduler.next_request()) is not None:
+            try:
+                request = self._requests.pop(request_id)
+            except KeyError as error:
+                raise RuntimeError(
+                    f"native coordinator returned unknown request {request_id}"
+                ) from error
+            try:
+                outputs = await self._handle_request(request)
+                await self._process_outputs(outputs)
+            finally:
+                self.scheduler.complete(request_id)
+
+    async def _schedule(self, request: Request) -> bool:
+        if not isinstance(request, Request):
+            raise TypeError("spider output must contain Request objects or items")
+        request_id = self.scheduler.schedule(
+            request.url,
+            request.method,
+            request.body,
+            str(request.priority),
+            not request.dont_filter,
+        )
+        inserted = request_id is not None
+        if inserted:
+            self._requests[request_id] = request
+            self.stats.inc_value("scheduler/enqueued")
+            await self.signals.send(
+                signals.request_scheduled,
+                request=request,
+                spider=self.spider,
+            )
+            self.scheduler.activate(request_id)
+        else:
+            self.stats.inc_value("dupefilter/filtered")
+            await self.signals.send(
+                signals.request_dropped,
+                request=request,
+                spider=self.spider,
+            )
+        return inserted
+
+
+def create_engine(crawler: object, spider: Spider, downloader: Downloader) -> CrawlEngine:
+    settings: Settings = crawler.settings  # type: ignore[attr-defined]
+    selected = str(settings.get("ENGINE_BACKEND", "python")).strip().lower()
+    if selected == "python":
+        return CrawlEngine(crawler, spider, downloader)
+    if selected == "rust":
+        return NativeCrawlEngine(crawler, spider, downloader)
+    if selected == "auto":
+        try:
+            return NativeCrawlEngine(crawler, spider, downloader)
+        except BackendUnavailableError:
+            return CrawlEngine(crawler, spider, downloader)
+    raise ValueError(f"invalid engine backend {selected!r}; expected 'python', 'rust', or 'auto'")

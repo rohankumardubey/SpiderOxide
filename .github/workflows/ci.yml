@@ -68,6 +68,9 @@ jobs:
       - name: Verify native downloader
         run: .venv/bin/python benchmark/verify_native_downloader.py
 
+      - name: Verify native engine
+        run: .venv/bin/python benchmark/verify_native_engine.py
+
       - name: Smoke-test Scrapy comparison
         run: |
           .venv/bin/python -m pip install "Scrapy>=2.17,<3"

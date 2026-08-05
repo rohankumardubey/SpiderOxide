@@ -17,7 +17,7 @@ from .backend import (
 )
 from .crawler import Crawler, CrawlerRunner
 from .downloader import Downloader, HttpxDownloader, RustDownloader
-from .engine import CrawlResult
+from .engine import CrawlResult, NativeCrawlEngine
 from .exceptions import (
     CloseSpider,
     DownloadError,
@@ -51,6 +51,7 @@ __all__ = [
     "IgnoreRequest",
     "HttpxDownloader",
     "NotConfigured",
+    "NativeCrawlEngine",
     "PriorityRequest",
     "Request",
     "RequestData",
