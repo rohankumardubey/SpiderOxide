@@ -28,6 +28,7 @@ from .exceptions import (
 )
 from .headers import Headers
 from .http import Request, Response, TextResponse
+from .selectors import Selector, SelectorList
 from .settings import Settings
 from .signals import SignalManager
 from .spider import Spider
@@ -59,6 +60,8 @@ __all__ = [
     "RustDownloader",
     "ScheduledRequest",
     "Scheduler",
+    "Selector",
+    "SelectorList",
     "Settings",
     "SignalManager",
     "Spider",

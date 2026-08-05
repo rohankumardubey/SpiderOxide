@@ -38,6 +38,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Preservation of the original Python request object
 * Concurrent asynchronous crawl engine
 * Native Tokio crawl coordination with bounded start-request admission
+* Scrapy-compatible CSS, XPath, and JMESPath selectors
 * Downloader and spider middleware
 * Item pipelines, signals, settings, and crawl statistics
 * Streaming HTTP downloads with repeated header support
@@ -78,10 +79,11 @@ class ExampleSpider(Spider):
     start_urls = ["https://example.com/"]
 
     def parse(self, response):
-        yield {
-            "url": response.url,
-            "status": response.status,
-        }
+        for link in response.css("a"):
+            yield {
+                "text": link.xpath("string(.)").get(),
+                "href": link.css("::attr(href)").get(),
+            }
 
 
 result = asyncio.run(Crawler(ExampleSpider).crawl())
@@ -128,6 +130,25 @@ result = asyncio.run(
 
 `ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
 requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
+
+## Selectors
+
+`TextResponse` provides the familiar Scrapy selector API through Parsel, the same selector library
+used by Scrapy. CSS and XPath expressions can be chained and mixed, including `::text`,
+`::attr(...)`, regular expressions, namespaces, and `get()` or `getall()` extraction.
+
+```python
+def parse(self, response):
+    for product in response.css("article.product"):
+        yield {
+            "name": product.css("h2::text").get(),
+            "price": product.xpath(".//span[@class='price']/text()").get(),
+        }
+```
+
+JSON responses support JMESPath with `response.jmespath(...)`. Selector types are inferred from the
+response `Content-Type`. Parsing uses the original response bytes, honors declared encodings and
+byte order marks, and resolves the first HTML `<base href>` against the response URL.
 
 ## Request processing
 
@@ -187,6 +208,7 @@ The validation suite compares:
 * native redirects, compression, streaming, timeouts, and response limits
 * native priority ordering, duplicate decisions, and request identity
 * native concurrency, backpressure, streaming starts, cancellation, and cleanup
+* CSS, XPath, XML namespace, JSON, malformed HTML, encoding, and base URL selector behavior
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -198,6 +220,7 @@ python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
+python benchmark/verify_selectors.py
 ```
 
 The standard validation uses 10,000 deterministic requests with a fixed random seed.
