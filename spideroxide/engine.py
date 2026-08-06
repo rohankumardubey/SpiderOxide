@@ -307,14 +307,20 @@ class NativeCrawlEngine(CrawlEngine):
         if pending_limit == 0:
             pending_limit = concurrency * 2
         try:
-            from ._native import NativeCrawlCoordinator
+            from ._native import NativeCrawlCoordinator, NativePolicyRuntime
         except ImportError as error:
             raise BackendUnavailableError(
                 "Rust engine requested but the extension is unavailable; "
                 "run `maturin develop --release` or select the Python engine"
             ) from error
+        policy_runtime = NativePolicyRuntime()
         coordinator = NativeCrawlCoordinator(concurrency, pending_limit)
-        super().__init__(crawler, spider, downloader)
+        crawler.native_policy_runtime = policy_runtime
+        try:
+            super().__init__(crawler, spider, downloader)
+        except BaseException:
+            crawler.native_policy_runtime = None
+            raise
         self.scheduler = coordinator
         self._requests: dict[int, Request] = {}
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from abc import ABCMeta
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -22,6 +23,17 @@ from spideroxide import (
 
 class TransientFixtureError(Exception):
     pass
+
+
+class VirtualRetryBase(Exception, metaclass=ABCMeta):
+    pass
+
+
+class VirtualRetryError(Exception):
+    pass
+
+
+VirtualRetryBase.register(VirtualRetryError)
 
 
 class SequenceDownloader:
@@ -180,6 +192,20 @@ async def _verify_limits_and_opt_outs() -> None:
     assert failed_result.stats["retry/max_reached"] == 1
     assert failed_result.stats["downloader/exception_count"] == 2
 
+    for engine in ("python", "rust"):
+        exhausted_invalid, exhausted_invalid_result = await _crawl(
+            [503],
+            engine=engine,
+            request_meta={
+                "retry_times": 2,
+                "max_retry_times": 1,
+                "priority_adjust": "invalid",
+            },
+        )
+        assert len(exhausted_invalid.history) == 1
+        assert exhausted_invalid_result.items[0]["status"] == 503
+        assert exhausted_invalid_result.stats["retry/max_reached"] == 1
+
     overridden, override_result = await _crawl(
         [503, 503, 503, 200],
         request_meta={
@@ -197,6 +223,31 @@ async def _verify_limits_and_opt_outs() -> None:
     )
     assert [request.priority for request in none_overrides.history] == [0, -1]
     assert none_override_result.items[0]["status"] == 200
+
+    for engine in ("python", "rust"):
+        padded, padded_result = await _crawl(
+            [503, 200],
+            engine=engine,
+            request_meta={"priority_adjust": " -2 "},
+        )
+        assert [request.priority for request in padded.history] == [0, -2]
+        assert padded_result.items[0]["status"] == 200
+
+        boolean, boolean_result = await _crawl(
+            [503, 200],
+            engine=engine,
+            request_meta={"priority_adjust": True},
+        )
+        assert [request.priority for request in boolean.history] == [0, 1]
+        assert boolean_result.items[0]["status"] == 200
+
+        floating, floating_result = await _crawl(
+            [503, 200],
+            engine=engine,
+            request_meta={"priority_adjust": 1.9},
+        )
+        assert [request.priority for request in floating.history] == [0, 1]
+        assert floating_result.items[0]["status"] == 200
 
     dont_retry, dont_retry_result = await _crawl(
         [503],
@@ -254,23 +305,38 @@ async def _verify_limits_and_opt_outs() -> None:
 
 
 async def _verify_custom_exception_and_helper() -> None:
-    custom, custom_result = await _crawl(
-        [TransientFixtureError("temporary"), 200],
-        settings={"RETRY_EXCEPTIONS": [TransientFixtureError]},
-    )
-    assert len(custom.history) == 2
-    reason = f"retry/reason_count/{__name__}.TransientFixtureError"
-    assert custom_result.stats[reason] == 1
+    for engine in ("python", "rust"):
+        custom, custom_result = await _crawl(
+            [TransientFixtureError("temporary"), 200],
+            engine=engine,
+            settings={"RETRY_EXCEPTIONS": [TransientFixtureError]},
+        )
+        assert len(custom.history) == 2
+        reason = f"retry/reason_count/{__name__}.TransientFixtureError"
+        assert custom_result.stats[reason] == 1
 
-    helper_downloader = SequenceDownloader([200])
-    helper_result = await Crawler(
-        ManualRetrySpider,
-        {"CONCURRENT_REQUESTS": 1},
-        downloader=helper_downloader,
-    ).crawl()
-    assert helper_result.items == ({"retry_times": 1, "priority": 3},)
-    assert helper_result.stats["manual_retry/count"] == 1
-    assert helper_result.stats["manual_retry/reason_count/empty response"] == 1
+        virtual, virtual_result = await _crawl(
+            [VirtualRetryError("virtual"), 200],
+            engine=engine,
+            settings={"RETRY_EXCEPTIONS": [VirtualRetryBase]},
+        )
+        assert len(virtual.history) == 2
+        virtual_reason = f"retry/reason_count/{__name__}.VirtualRetryError"
+        assert virtual_result.stats[virtual_reason] == 1
+
+    for engine in ("python", "rust"):
+        helper_downloader = SequenceDownloader([200])
+        helper_result = await Crawler(
+            ManualRetrySpider,
+            {
+                "CONCURRENT_REQUESTS": 1,
+                "ENGINE_BACKEND": engine,
+            },
+            downloader=helper_downloader,
+        ).crawl()
+        assert helper_result.items == ({"retry_times": 1, "priority": 3},)
+        assert helper_result.stats["manual_retry/count"] == 1
+        assert helper_result.stats["manual_retry/reason_count/empty response"] == 1
 
 
 async def _verify_construction_cleanup() -> None:
