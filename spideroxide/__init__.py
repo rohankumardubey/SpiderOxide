@@ -28,6 +28,7 @@ from .exceptions import (
 )
 from .headers import Headers
 from .http import Request, Response, TextResponse
+from .retry import RetryMiddleware, get_retry_request
 from .selectors import Selector, SelectorList
 from .settings import Settings
 from .signals import SignalManager
@@ -57,6 +58,7 @@ __all__ = [
     "Request",
     "RequestData",
     "Response",
+    "RetryMiddleware",
     "RustDownloader",
     "ScheduledRequest",
     "Scheduler",
@@ -72,6 +74,7 @@ __all__ = [
     "fingerprint_batch",
     "fingerprint_request",
     "fingerprint_requests",
+    "get_retry_request",
     "resolve_backend",
     "signals",
 ]

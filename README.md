@@ -39,6 +39,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Concurrent asynchronous crawl engine
 * Native Tokio crawl coordination with bounded start-request admission
 * Scrapy-compatible CSS, XPath, and JMESPath selectors
+* Scrapy-compatible retry policies with per-request overrides and stats
 * Downloader and spider middleware
 * Item pipelines, signals, settings, and crawl statistics
 * Streaming HTTP downloads with repeated header support
@@ -150,6 +151,34 @@ JSON responses support JMESPath with `response.jmespath(...)`. Selector types ar
 response `Content-Type`. Parsing uses the original response bytes, honors declared encodings and
 byte order marks, and resolves the first HTML `<base href>` against the response URL.
 
+## Retry policies
+
+Transient download failures are retried automatically with the same policy on the Python and Rust
+crawl engines. By default, SpiderOxide retries download exceptions and HTTP status codes `500`,
+`502`, `503`, `504`, `522`, `524`, `408`, and `429` up to two times.
+
+```python
+from spideroxide import Request
+
+
+request = Request(
+    "https://example.com/api",
+    meta={
+        "max_retry_times": 4,
+        "priority_adjust": -2,
+    },
+)
+```
+
+Set `dont_retry` in request metadata to disable retries for one request. Retried requests preserve
+their callbacks, errbacks, headers, cookies, body, and metadata, bypass duplicate filtering, and
+record `retry/count`, reason-specific counts, and exhaustion stats.
+
+The retry policy is configured with `RETRY_ENABLED`, `RETRY_TIMES`, `RETRY_HTTP_CODES`,
+`RETRY_PRIORITY_ADJUST`, `RETRY_EXCEPTIONS`, and `RETRY_GIVE_UP_LOG_LEVEL`. Spider callbacks and
+middleware can also call `get_retry_request()` to use the same policy for application-level retry
+decisions.
+
 ## Request processing
 
 SpiderOxide accepts any request object with `url`, `method`, `body`, and `priority` attributes.
@@ -209,6 +238,7 @@ The validation suite compares:
 * native priority ordering, duplicate decisions, and request identity
 * native concurrency, backpressure, streaming starts, cancellation, and cleanup
 * CSS, XPath, XML namespace, JSON, malformed HTML, encoding, and base URL selector behavior
+* retry status codes, exceptions, limits, opt-outs, request overrides, stats, and engine parity
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -221,6 +251,7 @@ python benchmark/verify_crawler.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
+python benchmark/verify_retry.py
 ```
 
 The standard validation uses 10,000 deterministic requests with a fixed random seed.
@@ -336,6 +367,9 @@ python benchmark/verify_integration.py
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
 python benchmark/verify_native_downloader.py
+python benchmark/verify_native_engine.py
+python benchmark/verify_selectors.py
+python benchmark/verify_retry.py
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements.
@@ -347,12 +381,12 @@ memory, and the URL canonicalizer intentionally implements a smaller contract th
 
 The current foundation includes Python and Rust crawl coordination, HTTP models, Python and Rust
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
-filtering, and scheduling. It does not yet include selector APIs, persistent job state, feed
-exports, extensions, robots handling, retry policies, proxy support, throttling, request depth
-policies, or Scrapy command-line compatibility.
+filtering, scheduling, selectors, and retry policies. It does not yet include persistent job state,
+feed exports, extensions, robots handling, proxy support, throttling, request depth policies, or
+Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
-representative crawls that include persistence, callbacks, retries, and concurrency.
+representative crawls that include persistence, callbacks, crawl policies, and concurrency.
 
 ## License
 

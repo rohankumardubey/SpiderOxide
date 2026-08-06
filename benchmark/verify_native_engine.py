@@ -149,6 +149,7 @@ async def _verify_engine_behavior() -> None:
             "CONCURRENT_REQUESTS": 1,
             "ENGINE_BACKEND": "rust",
             "ENGINE_MAX_PENDING": 2,
+            "RETRY_ENABLED": False,
         },
         downloader=downloader,
     )

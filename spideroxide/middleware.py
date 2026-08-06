@@ -11,9 +11,9 @@ DownloadCallable = Callable[[Request], Awaitable[Response]]
 
 
 class DownloaderMiddlewareManager:
-    def __init__(self, crawler: object, middleware: object) -> None:
+    def __init__(self, crawler: object, middleware: object, *, base: object = None) -> None:
         self.crawler = crawler
-        self.middleware = build_components(middleware, crawler)
+        self.middleware = build_components(middleware, crawler, base=base)
 
     async def download(self, request: Request, download: DownloadCallable) -> Request | Response:
         spider = self.crawler.spider  # type: ignore[attr-defined]
