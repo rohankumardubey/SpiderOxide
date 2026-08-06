@@ -3,9 +3,11 @@ use std::collections::{BinaryHeap, HashSet};
 
 mod downloader;
 mod engine;
+mod policy;
 
 use downloader::{NativeHttpClient, NativeHttpResponse};
 use engine::NativeCrawlCoordinator;
+use policy::{NativePolicyRuntime, NativeRetryDecision};
 use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
@@ -310,6 +312,8 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeHttpClient>()?;
     module.add_class::<NativeHttpResponse>()?;
     module.add_class::<NativeCrawlCoordinator>()?;
+    module.add_class::<NativePolicyRuntime>()?;
+    module.add_class::<NativeRetryDecision>()?;
     module.add_class::<Request>()?;
     module.add_class::<RustDupeFilter>()?;
     module.add_class::<RustScheduler>()?;
