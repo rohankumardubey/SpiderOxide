@@ -46,7 +46,8 @@ class CrawlEngine:
         self.scheduler = Scheduler()
         self.downloader_middleware = DownloaderMiddlewareManager(
             crawler,
-            self.settings.get("DOWNLOADER_MIDDLEWARES", []),
+            self.settings.get("DOWNLOADER_MIDDLEWARES", {}),
+            base=self.settings.get("DOWNLOADER_MIDDLEWARES_BASE", {}),
         )
         self.spider_middleware = SpiderMiddlewareManager(
             crawler,
@@ -201,23 +202,18 @@ class CrawlEngine:
         return inserted
 
     async def _handle_request(self, request: Request) -> list[object]:
-        self.stats.inc_value("downloader/request_count")
         try:
             downloaded = await self.downloader_middleware.download(request, self.downloader.fetch)
         except CloseSpider:
             raise
         except IgnoreRequest:
-            self.stats.inc_value("downloader/exception_count")
             return []
         except Exception as exception:
-            self.stats.inc_value("downloader/exception_count")
             return await self._run_errback(request, exception)
 
         if isinstance(downloaded, Request):
             return [downloaded]
         response = downloaded
-        self.stats.inc_value("downloader/response_count")
-        self.stats.inc_value(f"downloader/response_status_count/{response.status}")
         await self.signals.send(
             signals.response_received,
             response=response,

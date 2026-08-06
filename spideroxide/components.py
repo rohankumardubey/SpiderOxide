@@ -39,9 +39,40 @@ def component_references(value: object) -> list[object]:
     raise TypeError("component settings must be a mapping or iterable")
 
 
-def build_components(value: object, crawler: object) -> list[object]:
+def merged_component_references(base: object, custom: object) -> list[object]:
+    if isinstance(base, Mapping) and isinstance(custom, Mapping):
+        merged = {}
+        base_paths = {}
+        for reference, priority in base.items():
+            if priority is None:
+                continue
+            identity = load_object(reference) if isinstance(reference, str) else reference
+            merged[identity] = priority
+            if isinstance(reference, str):
+                base_paths[reference] = identity
+        for reference, priority in custom.items():
+            if priority is None:
+                identity = base_paths.get(reference) if isinstance(reference, str) else reference
+                if identity is not None:
+                    merged.pop(identity, None)
+                continue
+            identity = load_object(reference) if isinstance(reference, str) else reference
+            merged[identity] = priority
+        return component_references(merged)
+    merged_references = []
+    for reference in (*component_references(base), *component_references(custom)):
+        identity = load_object(reference) if isinstance(reference, str) else reference
+        if identity not in merged_references:
+            merged_references.append(identity)
+    return merged_references
+
+
+def build_components(value: object, crawler: object, *, base: object = None) -> list[object]:
     components = []
-    for reference in component_references(value):
+    references = (
+        component_references(value) if base is None else merged_component_references(base, value)
+    )
+    for reference in references:
         try:
             components.append(build_component(reference, crawler))
         except NotConfigured:

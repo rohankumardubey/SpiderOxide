@@ -105,6 +105,7 @@ class FoundationSpider(Spider):
         "DOWNLOADER_MIDDLEWARES": [DisabledMiddleware, TestDownloaderMiddleware],
         "SPIDER_MIDDLEWARES": [TestSpiderMiddleware],
         "ITEM_PIPELINES": [TestPipeline],
+        "RETRY_ENABLED": False,
     }
 
     def parse(self, response: Response) -> list[object]:

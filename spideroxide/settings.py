@@ -19,9 +19,20 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "DOWNLOAD_MAXSIZE": 0,
     "DOWNLOADER_BACKEND": "python",
     "USER_AGENT": "SpiderOxide/0.1",
-    "DOWNLOADER_MIDDLEWARES": [],
+    "DOWNLOADER_MIDDLEWARES_BASE": {
+        "spideroxide.retry.RetryMiddleware": 550,
+        "spideroxide.downloadermiddlewares.DownloaderStatsMiddleware": 850,
+    },
+    "DOWNLOADER_MIDDLEWARES": {},
+    "DOWNLOADER_STATS": True,
     "SPIDER_MIDDLEWARES": [],
     "ITEM_PIPELINES": [],
+    "RETRY_ENABLED": True,
+    "RETRY_TIMES": 2,
+    "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408, 429],
+    "RETRY_PRIORITY_ADJUST": -1,
+    "RETRY_EXCEPTIONS": ["spideroxide.exceptions.DownloadError"],
+    "RETRY_GIVE_UP_LOG_LEVEL": "ERROR",
 }
 
 

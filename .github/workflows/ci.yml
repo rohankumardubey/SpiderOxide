@@ -74,6 +74,9 @@ jobs:
       - name: Verify selectors
         run: .venv/bin/python benchmark/verify_selectors.py
 
+      - name: Verify retry policy
+        run: .venv/bin/python benchmark/verify_retry.py
+
       - name: Smoke-test Scrapy comparison
         run: |
           .venv/bin/python -m pip install "Scrapy>=2.17,<3"
