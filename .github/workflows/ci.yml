@@ -80,6 +80,12 @@ jobs:
       - name: Verify native policy runtime
         run: .venv/bin/python benchmark/verify_native_policy.py
 
+      - name: Verify native download slots
+        run: .venv/bin/python benchmark/verify_native_slots.py
+
+      - name: Verify redirect middleware
+        run: .venv/bin/python benchmark/verify_redirect.py
+
       - name: Smoke-test Scrapy comparison
         run: |
           .venv/bin/python -m pip install "Scrapy>=2.17,<3"

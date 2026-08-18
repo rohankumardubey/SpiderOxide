@@ -13,14 +13,19 @@ PRIORITIES = {
 
 DEFAULT_SETTINGS: dict[str, object] = {
     "CONCURRENT_REQUESTS": 16,
+    "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     "ENGINE_BACKEND": "python",
     "ENGINE_MAX_PENDING": 0,
+    "DOWNLOAD_DELAY": 0.0,
+    "RANDOMIZE_DOWNLOAD_DELAY": True,
+    "DOWNLOAD_SLOTS": {},
     "DOWNLOAD_TIMEOUT": 180.0,
     "DOWNLOAD_MAXSIZE": 0,
     "DOWNLOADER_BACKEND": "python",
     "USER_AGENT": "SpiderOxide/0.1",
     "DOWNLOADER_MIDDLEWARES_BASE": {
         "spideroxide.retry.RetryMiddleware": 550,
+        "spideroxide.redirect.RedirectMiddleware": 600,
         "spideroxide.downloadermiddlewares.DownloaderStatsMiddleware": 850,
     },
     "DOWNLOADER_MIDDLEWARES": {},
@@ -33,6 +38,14 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "RETRY_PRIORITY_ADJUST": -1,
     "RETRY_EXCEPTIONS": ["spideroxide.exceptions.DownloadError"],
     "RETRY_GIVE_UP_LOG_LEVEL": "ERROR",
+    "REDIRECT_ENABLED": True,
+    "REDIRECT_MAX_TIMES": 20,
+    "REDIRECT_PRIORITY_ADJUST": 2,
+    "AUTOTHROTTLE_ENABLED": False,
+    "AUTOTHROTTLE_START_DELAY": 5.0,
+    "AUTOTHROTTLE_MAX_DELAY": 60.0,
+    "AUTOTHROTTLE_TARGET_CONCURRENCY": 1.0,
+    "AUTOTHROTTLE_DEBUG": False,
 }
 
 

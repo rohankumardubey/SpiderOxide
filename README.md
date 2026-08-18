@@ -186,6 +186,45 @@ middleware preserves Python exception type identity and turns typed native decis
 public Scrapy-compatible request API. Native counter deltas are mirrored into `StatsCollector` so
 extensions can safely contribute to the same statistics.
 
+## Download slots and AutoThrottle
+
+The Rust engine applies Scrapy-compatible per-domain download slots before each network transfer.
+`CONCURRENT_REQUESTS_PER_DOMAIN` limits simultaneous transfers to one domain, while
+`DOWNLOAD_DELAY` and `RANDOMIZE_DOWNLOAD_DELAY` control the interval between transfer starts.
+Requests can set `download_slot` in metadata to share a slot across domains or separate traffic
+within one domain. `DOWNLOAD_SLOTS` can override `concurrency`, `delay`, and `randomize_delay` for
+individual slot keys.
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "CONCURRENT_REQUESTS_PER_DOMAIN": 4,
+            "DOWNLOAD_DELAY": 0.25,
+            "DOWNLOAD_SLOTS": {
+                "api.example.com": {"concurrency": 2, "delay": 0.5},
+            },
+        },
+    ).crawl()
+)
+```
+
+Enable adaptive delays with `AUTOTHROTTLE_ENABLED`. Rust starts each new slot at the greater of
+`DOWNLOAD_DELAY` and `AUTOTHROTTLE_START_DELAY`, then adjusts its delay from measured network
+latency and `AUTOTHROTTLE_TARGET_CONCURRENCY`. Adjustments stay between `DOWNLOAD_DELAY` and
+`AUTOTHROTTLE_MAX_DELAY`. Fast non-200 responses never reduce the delay. Set
+`autothrottle_dont_adjust_delay` to `True` in request metadata to exclude one response from
+adjustment. `AUTOTHROTTLE_DEBUG` logs the current native slot state after each transfer.
+
+Slot admission, active leases, timing, randomized intervals, adaptive delay decisions, and counters
+remain in Rust. Python derives Scrapy-compatible slot keys, records `download_slot` and
+`download_latency` in request metadata, and mirrors native counter deltas into public crawler stats.
+These settings currently require `ENGINE_BACKEND` to be `rust` or a successful `auto` selection.
+HTTP redirects return to the scheduler as Scrapy-compatible requests, so every redirect hop acquires
+the correct domain slot and observes its concurrency and delay policy.
+
 ## Request processing
 
 SpiderOxide accepts any request object with `url`, `method`, `body`, and `priority` attributes.
@@ -261,6 +300,8 @@ python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
+python benchmark/verify_native_slots.py
+python benchmark/verify_redirect.py
 ```
 
 The standard validation uses 10,000 deterministic requests with a fixed random seed.
@@ -393,7 +434,7 @@ The current foundation includes Python and Rust crawl coordination, HTTP models,
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
 filtering, scheduling, selectors, and Rust-owned retry policies and downloader statistics. It does
 not yet include persistent job state, feed exports, extensions, robots handling, proxy support,
-throttling, request depth policies, or Scrapy command-line compatibility.
+request depth policies, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.

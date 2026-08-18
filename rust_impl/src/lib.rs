@@ -4,6 +4,7 @@ use std::collections::{BinaryHeap, HashSet};
 mod downloader;
 mod engine;
 mod policy;
+mod slots;
 
 use downloader::{NativeHttpClient, NativeHttpResponse};
 use engine::NativeCrawlCoordinator;
@@ -12,6 +13,7 @@ use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
 use sha2::{Digest, Sha256};
+use slots::{NativeDownloadSlotLease, NativeDownloadSlotManager};
 use url::{Url, form_urlencoded};
 
 pyo3::create_exception!(_native, NativeDownloadError, pyo3::exceptions::PyException);
@@ -314,6 +316,8 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeCrawlCoordinator>()?;
     module.add_class::<NativePolicyRuntime>()?;
     module.add_class::<NativeRetryDecision>()?;
+    module.add_class::<NativeDownloadSlotManager>()?;
+    module.add_class::<NativeDownloadSlotLease>()?;
     module.add_class::<Request>()?;
     module.add_class::<RustDupeFilter>()?;
     module.add_class::<RustScheduler>()?;
