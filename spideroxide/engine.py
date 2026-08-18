@@ -203,7 +203,7 @@ class CrawlEngine:
 
     async def _handle_request(self, request: Request) -> list[object]:
         try:
-            downloaded = await self.downloader_middleware.download(request, self.downloader.fetch)
+            downloaded = await self._download(request)
         except CloseSpider:
             raise
         except IgnoreRequest:
@@ -221,6 +221,9 @@ class CrawlEngine:
             spider=self.spider,
         )
         return await self._run_callback(request, response)
+
+    async def _download(self, request: Request) -> Request | Response:
+        return await self.downloader_middleware.download(request, self.downloader.fetch)
 
     async def _run_callback(self, request: Request, response: Response) -> list[object]:
         try:
@@ -313,6 +316,8 @@ class NativeCrawlEngine(CrawlEngine):
                 "Rust engine requested but the extension is unavailable; "
                 "run `maturin develop --release` or select the Python engine"
             ) from error
+        from .native_slots import NativeDownloadSlots
+
         policy_runtime = NativePolicyRuntime()
         coordinator = NativeCrawlCoordinator(concurrency, pending_limit)
         crawler.native_policy_runtime = policy_runtime
@@ -320,7 +325,10 @@ class NativeCrawlEngine(CrawlEngine):
             super().__init__(crawler, spider, downloader)
         except BaseException:
             crawler.native_policy_runtime = None
+            crawler.native_download_slots = None
             raise
+        self._native_download_slots_type = NativeDownloadSlots
+        self.native_download_slots: NativeDownloadSlots | None = None
         self.scheduler = coordinator
         self._requests: dict[int, Request] = {}
 
@@ -333,6 +341,12 @@ class NativeCrawlEngine(CrawlEngine):
             await self.signals.send(signals.engine_started)
             await self.signals.send(signals.spider_opened, spider=self.spider)
             spider_opened = True
+            self.native_download_slots = self._native_download_slots_type(
+                self.settings,
+                self.spider,
+                self.stats,
+            )
+            self.crawler.native_download_slots = self.native_download_slots
 
             tasks = {asyncio.create_task(self._worker()) for _ in range(self.concurrent_requests)}
             tasks.add(asyncio.create_task(self._produce_native_start_requests()))
@@ -352,6 +366,8 @@ class NativeCrawlEngine(CrawlEngine):
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             self._requests.clear()
+            if self.native_download_slots is not None:
+                self.native_download_slots.close()
             await self._finish(reason, spider_opened)
         return CrawlResult(reason, tuple(self.items), dict(self.stats.get_stats()))
 
@@ -379,6 +395,18 @@ class NativeCrawlEngine(CrawlEngine):
                 await self._process_outputs(outputs)
             finally:
                 self.scheduler.complete(request_id)
+
+    async def _download(self, request: Request) -> Request | Response:
+        native_download_slots = self.native_download_slots
+        if native_download_slots is None:
+            raise RuntimeError("native download slots are not initialized")
+        return await self.downloader_middleware.download(
+            request,
+            lambda current: native_download_slots.download(
+                current,
+                self.downloader.fetch,
+            ),
+        )
 
     async def _schedule(self, request: Request) -> bool:
         if not isinstance(request, Request):

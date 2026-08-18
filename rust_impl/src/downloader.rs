@@ -1,7 +1,7 @@
 use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_compression::tokio::bufread::{BrotliDecoder, GzipDecoder, ZlibDecoder, ZstdDecoder};
 use futures_util::TryStreamExt;
@@ -111,6 +111,7 @@ pub(crate) struct NativeHttpResponse {
     headers: Vec<(String, Vec<u8>)>,
     body: Vec<u8>,
     protocol: String,
+    latency: f64,
 }
 
 #[pymethods]
@@ -141,6 +142,11 @@ impl NativeHttpResponse {
     #[getter]
     fn protocol(&self) -> &str {
         &self.protocol
+    }
+
+    #[getter]
+    fn latency(&self) -> f64 {
+        self.latency
     }
 }
 
@@ -175,7 +181,7 @@ impl NativeHttpClient {
         let mut builder = Client::builder()
             .cookie_provider(cookie_jar.clone())
             .default_headers(default_headers)
-            .redirect(redirect::Policy::limited(20));
+            .redirect(redirect::Policy::none());
         if let Some(user_agent) = user_agent.filter(|value| !value.is_empty()) {
             builder = builder.user_agent(user_agent);
         }
@@ -222,6 +228,7 @@ impl NativeHttpClient {
                 .request(parsed_method, &url)
                 .headers(parsed_headers)
                 .body(body);
+            let started = Instant::now();
             let response = tokio::time::timeout(timeout, request.send())
                 .await
                 .map_err(|_| {
@@ -231,6 +238,7 @@ impl NativeHttpClient {
                     ))
                 })?
                 .map_err(|error| download_error(format!("unable to download {url}: {error}")))?;
+            let latency = started.elapsed().as_secs_f64();
 
             if let Some(declared_size) = response.content_length()
                 && max_size != 0
@@ -292,6 +300,7 @@ impl NativeHttpClient {
                         headers: response_headers,
                         body: response_body,
                         protocol,
+                        latency,
                     },
                 )
             })

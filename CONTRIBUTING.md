@@ -41,6 +41,8 @@ python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
+python benchmark/verify_native_slots.py
+python benchmark/verify_redirect.py
 ```
 
 The release wheel must also contain the public `spideroxide` package without Rust source or build

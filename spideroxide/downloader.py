@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Iterable
 from typing import Protocol
@@ -68,12 +69,13 @@ class HttpxDownloader:
         timeout, self.max_size, user_agent = _download_settings(self.settings)
         self.client = httpx.AsyncClient(
             timeout=timeout,
-            follow_redirects=True,
+            follow_redirects=False,
             headers={"User-Agent": user_agent} if user_agent else None,
             transport=transport,
         )
 
     async def fetch(self, request: Request) -> Response:
+        started = asyncio.get_running_loop().time()
         try:
             async with self.client.stream(
                 request.method,
@@ -82,6 +84,7 @@ class HttpxDownloader:
                 content=request.body or None,
                 cookies=request.cookies,
             ) as raw_response:
+                request.meta["download_latency"] = asyncio.get_running_loop().time() - started
                 declared_size = int(raw_response.headers.get("Content-Length", 0))
                 if self.max_size and declared_size > self.max_size:
                     raise DownloadError(
@@ -160,6 +163,7 @@ class RustDownloader:
         except self._download_error as error:
             raise DownloadError(str(error)) from error
 
+        request.meta["download_latency"] = raw_response.latency
         return _response(
             request,
             url=raw_response.url,

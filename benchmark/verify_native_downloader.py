@@ -167,6 +167,7 @@ async def _verify() -> None:
         assert isinstance(echo, TextResponse)
         assert echo.request is echo_request
         assert echo.protocol == "HTTP/1.1"
+        assert 0 <= echo_request.meta["download_latency"] < 2
         assert echo.json() == {
             "method": "POST",
             "body": "payload",
@@ -176,10 +177,8 @@ async def _verify() -> None:
         }
 
         redirected = await downloader.fetch(Request(f"{base_url}/redirect"))
-        assert isinstance(redirected, TextResponse)
-        assert redirected.url == f"{base_url}/final"
-        assert redirected.json() == {"redirected": True}
-        assert redirected.headers.getlist("set-cookie") == [b"a=1", b"b=2"]
+        assert redirected.status == 302
+        assert redirected.headers["Location"] == b"/final"
 
         streamed = await downloader.fetch(Request(f"{base_url}/stream"))
         assert isinstance(streamed, TextResponse)
@@ -236,7 +235,7 @@ async def _verify() -> None:
 
         class NativeSpider(Spider):
             name = "native-downloader"
-            start_urls = [f"{base_url}/gzip"]
+            start_urls = [f"{base_url}/redirect"]
 
             def parse(self, response: TextResponse) -> dict[str, bool]:
                 return response.json()
@@ -249,7 +248,10 @@ async def _verify() -> None:
             },
         )
         result = await crawler.crawl()
-        assert result.items == ({"compressed": True},)
+        assert result.items == ({"redirected": True},)
+        assert result.stats["redirect/count"] == 1
+        assert result.stats["redirect/reason_count/302"] == 1
+        assert result.stats["downloader/slot/acquired"] == 2
         assert isinstance(crawler.engine, NativeCrawlEngine)
         assert isinstance(crawler.engine.downloader, RustDownloader)
     finally:
