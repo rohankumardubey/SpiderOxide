@@ -310,7 +310,11 @@ class NativeCrawlEngine(CrawlEngine):
         if pending_limit == 0:
             pending_limit = concurrency * 2
         try:
-            from ._native import NativeCrawlCoordinator, NativePolicyRuntime
+            from ._native import (
+                NativeCrawlCoordinator,
+                NativePolicyRuntime,
+                NativeRobotsRuntime,
+            )
         except ImportError as error:
             raise BackendUnavailableError(
                 "Rust engine requested but the extension is unavailable; "
@@ -319,16 +323,20 @@ class NativeCrawlEngine(CrawlEngine):
         from .native_slots import NativeDownloadSlots
 
         policy_runtime = NativePolicyRuntime()
+        robots_runtime = NativeRobotsRuntime()
         coordinator = NativeCrawlCoordinator(concurrency, pending_limit)
         crawler.native_policy_runtime = policy_runtime
+        crawler.native_robots_runtime = robots_runtime
         try:
             super().__init__(crawler, spider, downloader)
         except BaseException:
             crawler.native_policy_runtime = None
             crawler.native_download_slots = None
+            crawler.native_robots_runtime = None
             raise
         self._native_download_slots_type = NativeDownloadSlots
         self.native_download_slots: NativeDownloadSlots | None = None
+        self.native_robots_runtime = robots_runtime
         self.scheduler = coordinator
         self._requests: dict[int, Request] = {}
 
@@ -368,6 +376,10 @@ class NativeCrawlEngine(CrawlEngine):
             self._requests.clear()
             if self.native_download_slots is not None:
                 self.native_download_slots.close()
+            from .robots import sync_stats as sync_robots_stats
+
+            sync_robots_stats(self.crawler)
+            self.native_robots_runtime.close()
             await self._finish(reason, spider_opened)
         return CrawlResult(reason, tuple(self.items), dict(self.stats.get_stats()))
 

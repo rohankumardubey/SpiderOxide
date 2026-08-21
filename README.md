@@ -113,8 +113,8 @@ extension is unavailable.
 
 The Python crawl engine is also the default. The native engine moves priority scheduling, duplicate
 filtering, concurrency admission, worker wakeups, start-request backpressure, idle detection, retry
-decisions, and downloader attempt statistics into Rust. Spider callbacks, middleware, pipelines,
-signals, and item objects remain in Python.
+decisions, robots policy state, and downloader attempt statistics into Rust. Spider callbacks,
+middleware, pipelines, signals, and item objects remain in Python.
 
 Select the complete native runtime explicitly:
 
@@ -225,6 +225,37 @@ These settings currently require `ENGINE_BACKEND` to be `rust` or a successful `
 HTTP redirects return to the scheduler as Scrapy-compatible requests, so every redirect hop acquires
 the correct domain slot and observes its concurrency and delay policy.
 
+## Robots policy
+
+Set `ROBOTSTXT_OBEY` to `True` with the Rust engine to enforce robots.txt before downloading a
+request. Rust owns the per-origin policy cache, concurrent fetch deduplication, user-agent matching,
+allow and deny decisions, waiter wakeups, failure state, and counters. Policy matching uses
+Google-compatible longest-rule precedence with wildcard and end-anchor support.
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "ROBOTSTXT_OBEY": True,
+            "ROBOTSTXT_USER_AGENT": "SpiderOxide",
+        },
+    ).crawl()
+)
+```
+
+`ROBOTSTXT_USER_AGENT` overrides request headers for policy matching. Use a bare crawler product
+token for the closest standards-compatible behavior. When it is unset, each request's `User-Agent`
+header is used before falling back to `USER_AGENT`. Set `dont_obey_robotstxt` in request metadata to
+bypass policy for one request.
+
+The first request to an origin starts one `/robots.txt` transfer. Other concurrent requests for that
+origin await the same native policy state. Policy transfers use the configured downloader, retry
+middleware, redirects, native slots, and download statistics. A transfer failure is cached as
+unavailable and fails open, matching Scrapy behavior. Any HTTP response body, including a non-200
+response body, is parsed as policy content.
+
 ## Request processing
 
 SpiderOxide accepts any request object with `url`, `method`, `body`, and `priority` attributes.
@@ -300,6 +331,9 @@ python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
+python benchmark/verify_native_slots.py
+python benchmark/verify_redirect.py
+python benchmark/verify_native_robots.py
 python benchmark/verify_native_slots.py
 python benchmark/verify_redirect.py
 ```
@@ -433,8 +467,8 @@ memory, and the URL canonicalizer intentionally implements a smaller contract th
 The current foundation includes Python and Rust crawl coordination, HTTP models, Python and Rust
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
 filtering, scheduling, selectors, and Rust-owned retry policies and downloader statistics. It does
-not yet include persistent job state, feed exports, extensions, robots handling, proxy support,
-request depth policies, or Scrapy command-line compatibility.
+not yet include persistent job state, feed exports, extensions, proxy support, request depth
+policies, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.
