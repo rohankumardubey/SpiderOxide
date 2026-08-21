@@ -279,7 +279,7 @@ class TextResponse(Response):
             url = _url_from_selector(url)
         elif isinstance(url, SelectorList):
             raise ValueError("SelectorList is not supported")
-        return super().follow(url, **kwargs)
+        return Response.follow(self, url, **kwargs)
 
     @property
     def selector(self) -> Selector:

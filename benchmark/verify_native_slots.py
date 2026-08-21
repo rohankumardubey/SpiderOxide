@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -19,6 +20,14 @@ from spideroxide import (  # noqa: E402
     Spider,
     signals,
 )
+
+
+async def _wait_until(predicate, message: str) -> None:
+    for _ in range(100):
+        if predicate():
+            return
+        await asyncio.sleep(0.001)
+    raise AssertionError(message)
 
 
 async def _verify_native_manager() -> None:
@@ -54,7 +63,7 @@ async def _verify_native_manager() -> None:
     other = await manager.acquire("other.test")
     manager.release(other)
     manager.release(first)
-    third = await asyncio.wait_for(blocked, 0.1)
+    third = await asyncio.wait_for(blocked, 1.0)
     manager.release(second)
     manager.release(third)
     assert manager.stats() == {
@@ -81,19 +90,28 @@ async def _verify_native_manager() -> None:
 
     active = await throttled.acquire("blocked.test", 1, 10.0, False)
     waiting = asyncio.ensure_future(throttled.acquire("blocked.test", 1, 10.0, False))
-    await asyncio.sleep(0)
+    await _wait_until(
+        lambda: throttled.waiting_count("blocked.test") == 1,
+        "blocked acquisition did not register as a waiter",
+    )
     assert throttled.prune_inactive(0.0) == 1
     throttled.release(active)
-    await asyncio.sleep(0)
+    assert throttled.waiting_count("blocked.test") == 1
     assert throttled.prune_inactive(0.0) == 0
     waiting.cancel()
     await asyncio.gather(waiting, return_exceptions=True)
-    await asyncio.sleep(0.01)
+    await _wait_until(
+        lambda: throttled.waiting_count("blocked.test") == 0,
+        "cancelled acquisition remained registered as a waiter",
+    )
     assert throttled.prune_inactive(0.0) == 1
 
     active = await throttled.acquire("closing.test")
     waiting = asyncio.ensure_future(throttled.acquire("closing.test"))
-    await asyncio.sleep(0)
+    await _wait_until(
+        lambda: throttled.waiting_count("closing.test") == 1,
+        "closing acquisition did not register as a waiter",
+    )
     throttled.close()
     try:
         await waiting
@@ -108,20 +126,27 @@ async def _verify_native_manager() -> None:
         assert "unknown download slot" in str(error)
 
     cancellation_safe = NativeDownloadSlotManager(1)
+    acquired = asyncio.Event()
 
     async def acquire_until_cancelled() -> None:
         lease = await cancellation_safe.acquire("cancel.test")
         assert lease.key == "cancel.test"
+        acquired.set()
         await asyncio.sleep(10)
 
     cancelled = asyncio.create_task(acquire_until_cancelled())
-    await asyncio.sleep(0)
+    await asyncio.wait_for(acquired.wait(), 1.0)
     cancelled.cancel()
     await asyncio.gather(cancelled, return_exceptions=True)
-    await asyncio.sleep(0.01)
+    del cancelled
+    gc.collect()
+    await _wait_until(
+        lambda: cancellation_safe.slot_state("cancel.test")[1] == 0,
+        "cancelled task did not release its native lease",
+    )
     replacement = await asyncio.wait_for(
         cancellation_safe.acquire("cancel.test"),
-        0.1,
+        1.0,
     )
     cancellation_safe.release(replacement)
     assert cancellation_safe.stats()["downloader/slot/cancelled"] == 1
