@@ -24,6 +24,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "DOWNLOADER_BACKEND": "python",
     "USER_AGENT": "SpiderOxide/0.1",
     "DOWNLOADER_MIDDLEWARES_BASE": {
+        "spideroxide.robots.RobotsTxtMiddleware": 100,
         "spideroxide.retry.RetryMiddleware": 550,
         "spideroxide.redirect.RedirectMiddleware": 600,
         "spideroxide.downloadermiddlewares.DownloaderStatsMiddleware": 850,
@@ -38,6 +39,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "RETRY_PRIORITY_ADJUST": -1,
     "RETRY_EXCEPTIONS": ["spideroxide.exceptions.DownloadError"],
     "RETRY_GIVE_UP_LOG_LEVEL": "ERROR",
+    "ROBOTSTXT_OBEY": False,
+    "ROBOTSTXT_USER_AGENT": None,
     "REDIRECT_ENABLED": True,
     "REDIRECT_MAX_TIMES": 20,
     "REDIRECT_PRIORITY_ADJUST": 2,

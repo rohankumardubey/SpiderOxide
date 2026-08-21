@@ -30,6 +30,7 @@ class Crawler:
         self.engine: CrawlEngine | None = None
         self.native_policy_runtime: object | None = None
         self.native_download_slots: object | None = None
+        self.native_robots_runtime: object | None = None
 
     async def crawl(self, *args: object, **kwargs: object) -> CrawlResult:
         if self.spider is not None:

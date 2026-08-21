@@ -477,6 +477,15 @@ impl NativeDownloadSlotManager {
         ))
     }
 
+    fn waiting_count(&self, key: &str) -> PyResult<usize> {
+        let state = self.lock_state()?;
+        let slot = state
+            .slots
+            .get(key)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown download slot {key:?}")))?;
+        Ok(slot.waiting)
+    }
+
     #[getter]
     fn slot_count(&self) -> PyResult<usize> {
         Ok(self.lock_state()?.slots.len())
