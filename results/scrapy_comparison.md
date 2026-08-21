@@ -8,7 +8,7 @@ This report compares SpiderOxide's Rust request-processing backend with Scrapy 2
 * SpiderOxide 0.1.0
 * Scrapy 2.17.0
 * rustc 1.97.1 (8bab26f4f 2026-07-14)
-* macOS-26.5.2-arm64-arm-64bit-Mach-O
+* macOS-26.6.1-arm64-arm-64bit-Mach-O
 * arm64, 12 logical CPUs
 * SpiderOxide backend: Rust release
 
@@ -23,16 +23,16 @@ This report compares SpiderOxide's Rust request-processing backend with Scrapy 2
 
 | Test | Requests | SpiderOxide median | Scrapy median | Speedup |
 |---|---:|---:|---:|---:|
-| fingerprint | 10,000 | 20.423 ms | 172.717 ms | 8.46x |
-| dupefilter | 10,000 | 12.935 ms | 176.490 ms | 13.64x |
-| scheduler_insert | 10,000 | 24.228 ms | 233.778 ms | 9.65x |
-| scheduler_remove | 10,000 | 15.710 ms | 35.689 ms | 2.27x |
-| end_to_end | 10,000 | 41.700 ms | 264.216 ms | 6.34x |
-| fingerprint | 100,000 | 208.984 ms | 1837.775 ms | 8.79x |
-| dupefilter | 100,000 | 140.853 ms | 1876.409 ms | 13.32x |
-| scheduler_insert | 100,000 | 272.259 ms | 2424.178 ms | 8.90x |
-| scheduler_remove | 100,000 | 214.439 ms | 389.061 ms | 1.81x |
-| end_to_end | 100,000 | 505.125 ms | 2716.902 ms | 5.38x |
+| fingerprint | 10,000 | 20.819 ms | 180.422 ms | 8.67x |
+| dupefilter | 10,000 | 13.067 ms | 181.628 ms | 13.90x |
+| scheduler_insert | 10,000 | 24.614 ms | 238.118 ms | 9.67x |
+| scheduler_remove | 10,000 | 16.958 ms | 38.338 ms | 2.26x |
+| end_to_end | 10,000 | 42.266 ms | 271.284 ms | 6.42x |
+| fingerprint | 100,000 | 211.912 ms | 1873.443 ms | 8.84x |
+| dupefilter | 100,000 | 141.861 ms | 1911.053 ms | 13.47x |
+| scheduler_insert | 100,000 | 272.694 ms | 2443.718 ms | 8.96x |
+| scheduler_remove | 100,000 | 220.222 ms | 408.325 ms | 1.85x |
+| end_to_end | 100,000 | 504.474 ms | 2743.858 ms | 5.44x |
 
 A speedup above 1.0 means SpiderOxide was faster.
 

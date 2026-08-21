@@ -4,7 +4,7 @@
     "spideroxide_version": "0.1.0",
     "scrapy_version": "2.17.0",
     "rust_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
-    "operating_system": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "operating_system": "macOS-26.6.1-arm64-arm-64bit-Mach-O",
     "architecture": "arm64",
     "logical_cpu_count": 12,
     "spideroxide_backend": "Rust release"
@@ -41,27 +41,27 @@
       "duplicate_requests": 3000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 20423188.0,
-        "mean_ns": 20358358.5,
-        "min_ns": 19861459,
-        "max_ns": 20820500,
-        "stdev_ns": 306189.7794459617,
+        "median_ns": 20819083.5,
+        "mean_ns": 20945387.6,
+        "min_ns": 20402542,
+        "max_ns": 22157292,
+        "stdev_ns": 473773.06025311316,
         "operations": 10000,
-        "operations_per_second": 489639.52150859113,
-        "ns_per_operation": 2042.3188
+        "operations_per_second": 480328.54087933316,
+        "ns_per_operation": 2081.90835
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 172716563.0,
-        "mean_ns": 172922762.5,
-        "min_ns": 170457083,
-        "max_ns": 175811125,
-        "stdev_ns": 1583787.2764789853,
+        "median_ns": 180421667.0,
+        "mean_ns": 180862312.4,
+        "min_ns": 178322625,
+        "max_ns": 185789333,
+        "stdev_ns": 2118527.68855528,
         "operations": 10000,
-        "operations_per_second": 57898.32675167349,
-        "ns_per_operation": 17271.6563
+        "operations_per_second": 55425.71558215344,
+        "ns_per_operation": 18042.1667
       },
-      "speedup": 8.456885526392844
+      "speedup": 8.666167605312694
     },
     {
       "test": "dupefilter",
@@ -70,27 +70,27 @@
       "duplicate_requests": 3000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 12935250.5,
-        "mean_ns": 12884896.1,
-        "min_ns": 12388792,
-        "max_ns": 13186833,
-        "stdev_ns": 241868.6152078116,
+        "median_ns": 13066688.0,
+        "mean_ns": 13090695.8,
+        "min_ns": 12558208,
+        "max_ns": 13566708,
+        "stdev_ns": 345091.46927986114,
         "operations": 10000,
-        "operations_per_second": 773081.2789439214,
-        "ns_per_operation": 1293.52505
+        "operations_per_second": 765304.872971636,
+        "ns_per_operation": 1306.6688
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 176490354.0,
-        "mean_ns": 177614800,
-        "min_ns": 175225667,
-        "max_ns": 185250250,
-        "stdev_ns": 2962915.551101126,
+        "median_ns": 181628375.0,
+        "mean_ns": 182271587.5,
+        "min_ns": 180549292,
+        "max_ns": 185636333,
+        "stdev_ns": 1788554.190980789,
         "operations": 10000,
-        "operations_per_second": 56660.32037082322,
-        "ns_per_operation": 17649.0354
+        "operations_per_second": 55057.476564440985,
+        "ns_per_operation": 18162.8375
       },
-      "speedup": 13.644138859158545
+      "speedup": 13.900108045741966
     },
     {
       "test": "scheduler_insert",
@@ -99,27 +99,27 @@
       "duplicate_requests": 3000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 24227833.5,
-        "mean_ns": 24300041.8,
-        "min_ns": 23764125,
-        "max_ns": 24996792,
-        "stdev_ns": 378347.5964884966,
+        "median_ns": 24613791.5,
+        "mean_ns": 24534175,
+        "min_ns": 23955416,
+        "max_ns": 24955834,
+        "stdev_ns": 312371.5749943398,
         "operations": 10000,
-        "operations_per_second": 412748.4201177129,
-        "ns_per_operation": 2422.78335
+        "operations_per_second": 406276.2943287303,
+        "ns_per_operation": 2461.37915
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 233778479.0,
-        "mean_ns": 236305850.1,
-        "min_ns": 229304292,
-        "max_ns": 251867458,
-        "stdev_ns": 7493163.5013251975,
+        "median_ns": 238118250.0,
+        "mean_ns": 237713575,
+        "min_ns": 233620458,
+        "max_ns": 240905084,
+        "stdev_ns": 2561261.2389688017,
         "operations": 10000,
-        "operations_per_second": 42775.53709295884,
-        "ns_per_operation": 23377.8479
+        "operations_per_second": 41995.941092293426,
+        "ns_per_operation": 23811.825
       },
-      "speedup": 9.649169786477193
+      "speedup": 9.674180022204219
     },
     {
       "test": "scheduler_remove",
@@ -128,27 +128,27 @@
       "duplicate_requests": 3000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 15709687.5,
-        "mean_ns": 16366854,
-        "min_ns": 14527208,
-        "max_ns": 24601541,
-        "stdev_ns": 2961327.3691166863,
+        "median_ns": 16958458.0,
+        "mean_ns": 16568133.2,
+        "min_ns": 14974916,
+        "max_ns": 17919666,
+        "stdev_ns": 1088827.225888458,
         "operations": 7000,
-        "operations_per_second": 445584.9296811283,
-        "ns_per_operation": 2244.2410714285716
+        "operations_per_second": 412773.37833428016,
+        "ns_per_operation": 2422.636857142857
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 35688916.5,
-        "mean_ns": 35829558.3,
-        "min_ns": 35041584,
-        "max_ns": 37554875,
-        "stdev_ns": 802742.6113471588,
+        "median_ns": 38337667.0,
+        "mean_ns": 38266083.4,
+        "min_ns": 36308292,
+        "max_ns": 39945333,
+        "stdev_ns": 1117377.3704335224,
         "operations": 7000,
-        "operations_per_second": 196139.32521599528,
-        "ns_per_operation": 5098.4166428571425
+        "operations_per_second": 182588.05367577533,
+        "ns_per_operation": 5476.809571428572
       },
-      "speedup": 2.271777621292594
+      "speedup": 2.2606811892920926
     },
     {
       "test": "end_to_end",
@@ -157,27 +157,27 @@
       "duplicate_requests": 3000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 41700500.0,
-        "mean_ns": 41660604.2,
-        "min_ns": 40572792,
-        "max_ns": 42821917,
-        "stdev_ns": 816648.6288328795,
+        "median_ns": 42265833.0,
+        "mean_ns": 42390145.8,
+        "min_ns": 41523250,
+        "max_ns": 43717750,
+        "stdev_ns": 647686.837681744,
         "operations": 10000,
-        "operations_per_second": 239805.2781141713,
-        "ns_per_operation": 4170.05
+        "operations_per_second": 236597.72658449673,
+        "ns_per_operation": 4226.5833
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 264216250.0,
-        "mean_ns": 264523562.4,
-        "min_ns": 261472333,
-        "max_ns": 267728500,
-        "stdev_ns": 2088669.4846933964,
+        "median_ns": 271283937.0,
+        "mean_ns": 271540508.2,
+        "min_ns": 268667625,
+        "max_ns": 275076584,
+        "stdev_ns": 2295335.484629537,
         "operations": 10000,
-        "operations_per_second": 37847.78566798977,
-        "ns_per_operation": 26421.625
+        "operations_per_second": 36861.747549763706,
+        "ns_per_operation": 27128.3937
       },
-      "speedup": 6.336045131353341
+      "speedup": 6.418516275309184
     },
     {
       "test": "fingerprint",
@@ -186,27 +186,27 @@
       "duplicate_requests": 30000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 208984021.0,
-        "mean_ns": 210613087.7,
-        "min_ns": 206078125,
-        "max_ns": 227037542,
-        "stdev_ns": 5908989.853808311,
+        "median_ns": 211911770.5,
+        "mean_ns": 212308287.6,
+        "min_ns": 209498125,
+        "max_ns": 215816667,
+        "stdev_ns": 1879097.416773288,
         "operations": 100000,
-        "operations_per_second": 478505.48344076506,
-        "ns_per_operation": 2089.84021
+        "operations_per_second": 471894.50479344657,
+        "ns_per_operation": 2119.117705
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 1837775104.0,
-        "mean_ns": 1844202179.1,
-        "min_ns": 1822370250,
-        "max_ns": 1887715833,
-        "stdev_ns": 20293200.20289431,
+        "median_ns": 1873443312.5,
+        "mean_ns": 1872719620.8,
+        "min_ns": 1864090583,
+        "max_ns": 1882818042,
+        "stdev_ns": 6818433.3901109705,
         "operations": 100000,
-        "operations_per_second": 54413.62209246687,
-        "ns_per_operation": 18377.75104
+        "operations_per_second": 53377.64923698485,
+        "ns_per_operation": 18734.433125
       },
-      "speedup": 8.793854645949223
+      "speedup": 8.840676042107816
     },
     {
       "test": "dupefilter",
@@ -215,27 +215,27 @@
       "duplicate_requests": 30000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 140853375.0,
-        "mean_ns": 140715291.7,
-        "min_ns": 139275291,
-        "max_ns": 143333541,
-        "stdev_ns": 1140977.887604902,
+        "median_ns": 141861291.5,
+        "mean_ns": 143183275,
+        "min_ns": 139904625,
+        "max_ns": 151234083,
+        "stdev_ns": 3581664.5285010217,
         "operations": 100000,
-        "operations_per_second": 709958.1390932237,
-        "ns_per_operation": 1408.53375
+        "operations_per_second": 704913.9264321445,
+        "ns_per_operation": 1418.612915
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 1876408916.5,
-        "mean_ns": 1890058474.9,
-        "min_ns": 1862811708,
-        "max_ns": 1994407625,
-        "stdev_ns": 40013422.121260315,
+        "median_ns": 1911052646.0,
+        "mean_ns": 1912159812.7,
+        "min_ns": 1905479375,
+        "max_ns": 1921207042,
+        "stdev_ns": 5406857.257915751,
         "operations": 100000,
-        "operations_per_second": 53293.28757748951,
-        "ns_per_operation": 18764.089165
+        "operations_per_second": 52327.18219945889,
+        "ns_per_operation": 19110.52646
       },
-      "speedup": 13.321717825362722
+      "speedup": 13.47127624310399
     },
     {
       "test": "scheduler_insert",
@@ -244,27 +244,27 @@
       "duplicate_requests": 30000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 272258896.0,
-        "mean_ns": 275600470.8,
-        "min_ns": 268701291,
-        "max_ns": 308303292,
-        "stdev_ns": 11791317.570266888,
+        "median_ns": 272694416.5,
+        "mean_ns": 272958570.9,
+        "min_ns": 269112917,
+        "max_ns": 277540750,
+        "stdev_ns": 3135990.7840344477,
         "operations": 100000,
-        "operations_per_second": 367297.45646217564,
-        "ns_per_operation": 2722.58896
+        "operations_per_second": 366710.8453612214,
+        "ns_per_operation": 2726.944165
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 2424177771.0,
-        "mean_ns": 2424874712.7,
-        "min_ns": 2408424500,
-        "max_ns": 2445161292,
-        "stdev_ns": 12748235.899848184,
+        "median_ns": 2443718229.0,
+        "mean_ns": 2455964108.5,
+        "min_ns": 2426249208,
+        "max_ns": 2573008625,
+        "stdev_ns": 42645285.33508047,
         "operations": 100000,
-        "operations_per_second": 41251.10014466839,
-        "ns_per_operation": 24241.77771
+        "operations_per_second": 40921.24812643447,
+        "ns_per_operation": 24437.18229
       },
-      "speedup": 8.903943293004465
+      "speedup": 8.961379775812167
     },
     {
       "test": "scheduler_remove",
@@ -273,27 +273,27 @@
       "duplicate_requests": 30000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 214439437.0,
-        "mean_ns": 214690591.8,
-        "min_ns": 211188167,
-        "max_ns": 220733250,
-        "stdev_ns": 2498320.430251839,
+        "median_ns": 220221999.5,
+        "mean_ns": 220923899.9,
+        "min_ns": 216628167,
+        "max_ns": 227813666,
+        "stdev_ns": 3994090.3948887745,
         "operations": 70000,
-        "operations_per_second": 326432.4929187349,
-        "ns_per_operation": 3063.4205285714283
+        "operations_per_second": 317861.06818996527,
+        "ns_per_operation": 3146.0285642857143
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 389060812.5,
-        "mean_ns": 392538341.8,
-        "min_ns": 383593334,
-        "max_ns": 416299625,
-        "stdev_ns": 10090618.56629287,
+        "median_ns": 408324916.0,
+        "mean_ns": 409499029.2,
+        "min_ns": 400901292,
+        "max_ns": 421871417,
+        "stdev_ns": 7142212.194022472,
         "operations": 70000,
-        "operations_per_second": 179920.4590927543,
-        "ns_per_operation": 5558.011607142857
+        "operations_per_second": 171432.10530899858,
+        "ns_per_operation": 5833.213085714286
       },
-      "speedup": 1.8143155845909071
+      "speedup": 1.8541513424048264
     },
     {
       "test": "end_to_end",
@@ -302,27 +302,27 @@
       "duplicate_requests": 30000,
       "spideroxide": {
         "runs": 10,
-        "median_ns": 505125000.5,
-        "mean_ns": 504934025.2,
-        "min_ns": 500673167,
-        "max_ns": 509961917,
-        "stdev_ns": 3122768.4241495575,
+        "median_ns": 504474479.0,
+        "mean_ns": 506509533.3,
+        "min_ns": 499433125,
+        "max_ns": 526890209,
+        "stdev_ns": 8141017.974715735,
         "operations": 100000,
-        "operations_per_second": 197970.79911114002,
-        "ns_per_operation": 5051.250005
+        "operations_per_second": 198226.0831077641,
+        "ns_per_operation": 5044.74479
       },
       "scrapy": {
         "runs": 10,
-        "median_ns": 2716901875.5,
-        "mean_ns": 2729333854.3,
-        "min_ns": 2703678625,
-        "max_ns": 2773254958,
-        "stdev_ns": 26183980.479426745,
+        "median_ns": 2743858104.0,
+        "mean_ns": 2755818920.7,
+        "min_ns": 2733581375,
+        "max_ns": 2859520500,
+        "stdev_ns": 36968195.257719554,
         "operations": 100000,
-        "operations_per_second": 36806.62923521914,
-        "ns_per_operation": 27169.018755
+        "operations_per_second": 36445.0333106584,
+        "ns_per_operation": 27438.58104
       },
-      "speedup": 5.378672353992901
+      "speedup": 5.43904244559416
     }
   ]
 }

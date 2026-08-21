@@ -361,36 +361,39 @@ with 70,000 unique requests and 30,000 duplicates.
   <tbody>
     <tr>
       <td>Fingerprinting</td>
-      <td>208.984 ms</td>
-      <td>1,837.775 ms</td>
-      <td><strong>8.79x</strong></td>
+      <td>211.912 ms</td>
+      <td>1,873.443 ms</td>
+      <td><strong>8.84x</strong></td>
     </tr>
     <tr>
       <td>Duplicate filtering</td>
-      <td>140.853 ms</td>
-      <td>1,876.409 ms</td>
-      <td><strong>13.32x</strong></td>
+      <td>141.861 ms</td>
+      <td>1,911.053 ms</td>
+      <td><strong>13.47x</strong></td>
     </tr>
     <tr>
       <td>Scheduler insertion</td>
-      <td>272.259 ms</td>
-      <td>2,424.178 ms</td>
-      <td><strong>8.90x</strong></td>
+      <td>272.694 ms</td>
+      <td>2,443.718 ms</td>
+      <td><strong>8.96x</strong></td>
     </tr>
     <tr>
       <td>Scheduler removal</td>
-      <td>214.439 ms</td>
-      <td>389.061 ms</td>
-      <td><strong>1.81x</strong></td>
+      <td>220.222 ms</td>
+      <td>408.325 ms</td>
+      <td><strong>1.85x</strong></td>
     </tr>
     <tr>
       <td>Combined scheduler flow</td>
-      <td>505.125 ms</td>
-      <td>2,716.902 ms</td>
-      <td><strong>5.38x</strong></td>
+      <td>504.474 ms</td>
+      <td>2,743.858 ms</td>
+      <td><strong>5.44x</strong></td>
     </tr>
   </tbody>
 </table>
+
+At 10,000 requests, the combined scheduler flow completed in 42.266 ms for SpiderOxide and
+271.284 ms for Scrapy, a 6.42x speedup.
 
 The comparison used SpiderOxide 0.1.0, Scrapy 2.17.0, CPython 3.14.6, and Rust 1.97.1 on macOS
 arm64 with 12 logical CPUs. Each value is the median of 10 measured runs after 3 warm-up runs.
@@ -398,7 +401,7 @@ Request construction was outside the timed sections, run order alternated, and g
 ran before each timing.
 
 These are component benchmarks. They exclude networking, response parsing, selectors, middleware,
-pipelines, reactor overhead, and complete crawl behavior. They must not be interpreted as a 5.38x
+pipelines, reactor overhead, and complete crawl behavior. They must not be interpreted as a 5.44x
 end-to-end Scrapy crawl speedup.
 
 The complete 10,000 and 100,000 request results are available in the
