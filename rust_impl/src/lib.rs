@@ -1,12 +1,14 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 
+mod depth;
 mod downloader;
 mod engine;
 mod policy;
 mod robots;
 mod slots;
 
+use depth::{NativeDepthDecision, NativeDepthPolicy};
 use downloader::{NativeHttpClient, NativeHttpResponse};
 use engine::NativeCrawlCoordinator;
 use policy::{NativePolicyRuntime, NativeRetryDecision};
@@ -315,6 +317,8 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     module.add_class::<NativeHttpClient>()?;
     module.add_class::<NativeHttpResponse>()?;
+    module.add_class::<NativeDepthPolicy>()?;
+    module.add_class::<NativeDepthDecision>()?;
     module.add_class::<NativeCrawlCoordinator>()?;
     module.add_class::<NativePolicyRuntime>()?;
     module.add_class::<NativeRetryDecision>()?;

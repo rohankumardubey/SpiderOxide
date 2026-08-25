@@ -52,6 +52,7 @@ class CrawlEngine:
         self.spider_middleware = SpiderMiddlewareManager(
             crawler,
             self.settings.get("SPIDER_MIDDLEWARES", []),
+            base=self.settings.get("SPIDER_MIDDLEWARES_BASE", {}),
         )
         self.item_pipelines = ItemPipelineManager(
             crawler,
@@ -312,6 +313,7 @@ class NativeCrawlEngine(CrawlEngine):
         try:
             from ._native import (
                 NativeCrawlCoordinator,
+                NativeDepthPolicy,
                 NativePolicyRuntime,
                 NativeRobotsRuntime,
             )
@@ -323,14 +325,21 @@ class NativeCrawlEngine(CrawlEngine):
         from .native_slots import NativeDownloadSlots
 
         policy_runtime = NativePolicyRuntime()
+        depth_policy = NativeDepthPolicy(
+            str(settings.getint("DEPTH_LIMIT")),
+            str(settings.getint("DEPTH_PRIORITY")),
+            settings.getbool("DEPTH_STATS_VERBOSE"),
+        )
         robots_runtime = NativeRobotsRuntime()
         coordinator = NativeCrawlCoordinator(concurrency, pending_limit)
         crawler.native_policy_runtime = policy_runtime
+        crawler.native_depth_policy = depth_policy
         crawler.native_robots_runtime = robots_runtime
         try:
             super().__init__(crawler, spider, downloader)
         except BaseException:
             crawler.native_policy_runtime = None
+            crawler.native_depth_policy = None
             crawler.native_download_slots = None
             crawler.native_robots_runtime = None
             raise
@@ -376,8 +385,10 @@ class NativeCrawlEngine(CrawlEngine):
             self._requests.clear()
             if self.native_download_slots is not None:
                 self.native_download_slots.close()
+            from .depth import sync_stats as sync_depth_stats
             from .robots import sync_stats as sync_robots_stats
 
+            sync_depth_stats(self.crawler)
             sync_robots_stats(self.crawler)
             self.native_robots_runtime.close()
             await self._finish(reason, spider_opened)

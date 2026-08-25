@@ -41,6 +41,7 @@ python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
+python benchmark/verify_depth.py
 python benchmark/verify_native_slots.py
 python benchmark/verify_redirect.py
 python benchmark/verify_native_robots.py

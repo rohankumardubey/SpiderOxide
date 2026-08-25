@@ -69,8 +69,8 @@ class DownloaderMiddlewareManager:
 
 
 class SpiderMiddlewareManager:
-    def __init__(self, crawler: object, middleware: object) -> None:
-        self.middleware = build_components(middleware, crawler)
+    def __init__(self, crawler: object, middleware: object, *, base: object = None) -> None:
+        self.middleware = build_components(middleware, crawler, base=base)
 
     async def process_input(self, response: Response, spider: object) -> None:
         for component in self.middleware:
