@@ -40,6 +40,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Native Tokio crawl coordination with bounded start-request admission
 * Scrapy-compatible CSS, XPath, and JMESPath selectors
 * Rust-owned retry policies and downloader statistics with Scrapy-compatible APIs
+* Scrapy-compatible request depth limits, priorities, and statistics
 * Downloader and spider middleware
 * Item pipelines, signals, settings, and crawl statistics
 * Streaming HTTP downloads with repeated header support
@@ -186,6 +187,37 @@ middleware preserves Python exception type identity and turns typed native decis
 public Scrapy-compatible request API. Native counter deltas are mirrored into `StatsCollector` so
 extensions can safely contribute to the same statistics.
 
+## Request depth policy
+
+SpiderOxide enables a Scrapy-compatible `DepthMiddleware` by default. Start responses begin at depth
+zero, requests yielded by their callbacks receive depth one, and each later callback increments the
+depth again. The current value is available through `request.meta["depth"]` and
+`response.meta["depth"]`.
+
+Set `DEPTH_LIMIT` to the deepest request SpiderOxide should schedule. Its default value of `0` leaves
+depth unlimited. SpiderOxide subtracts `depth * DEPTH_PRIORITY` from each generated request's
+priority, so a positive value favors shallower requests and a negative value favors deeper requests.
+For example:
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "DEPTH_LIMIT": 4,
+            "DEPTH_PRIORITY": 1,
+            "DEPTH_STATS_VERBOSE": True,
+        },
+    ).crawl()
+)
+```
+
+Accepted child requests update `request_depth_max`. Enabling `DEPTH_STATS_VERBOSE` also records
+`request_depth_count/<depth>` counters. With the Rust engine, `NativeDepthPolicy` owns depth
+increments, limit decisions, arbitrary-size priority adjustments, and native statistics. Python
+only maps each typed decision back to the Scrapy-compatible `Request` object.
+
 ## Download slots and AutoThrottle
 
 The Rust engine applies Scrapy-compatible per-domain download slots before each network transfer.
@@ -317,6 +349,7 @@ The validation suite compares:
 * CSS, XPath, XML namespace, JSON, malformed HTML, encoding, and base URL selector behavior
 * retry status codes, exceptions, limits, opt-outs, request overrides, stats, and engine parity
 * native policy ownership, exception inheritance, arbitrary priorities, fallback, and extension stats
+* request depth limits, priority adjustments, verbose stats, arbitrary integers, and engine parity
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -331,11 +364,10 @@ python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
+python benchmark/verify_depth.py
 python benchmark/verify_native_slots.py
 python benchmark/verify_redirect.py
 python benchmark/verify_native_robots.py
-python benchmark/verify_native_slots.py
-python benchmark/verify_redirect.py
 ```
 
 The standard validation uses 10,000 deterministic requests with a fixed random seed.
@@ -458,6 +490,10 @@ python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
+python benchmark/verify_depth.py
+python benchmark/verify_native_slots.py
+python benchmark/verify_redirect.py
+python benchmark/verify_native_robots.py
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements.
@@ -469,9 +505,9 @@ memory, and the URL canonicalizer intentionally implements a smaller contract th
 
 The current foundation includes Python and Rust crawl coordination, HTTP models, Python and Rust
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
-filtering, scheduling, selectors, and Rust-owned retry policies and downloader statistics. It does
-not yet include persistent job state, feed exports, extensions, proxy support, request depth
-policies, or Scrapy command-line compatibility.
+filtering, scheduling, selectors, and Rust-owned retry, request depth, robots, download slot, and
+downloader statistics policies. It does not yet include persistent job state, feed exports,
+extensions, proxy support, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.

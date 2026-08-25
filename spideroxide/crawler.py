@@ -29,6 +29,7 @@ class Crawler:
         self.spider: Spider | None = None
         self.engine: CrawlEngine | None = None
         self.native_policy_runtime: object | None = None
+        self.native_depth_policy: object | None = None
         self.native_download_slots: object | None = None
         self.native_robots_runtime: object | None = None
 

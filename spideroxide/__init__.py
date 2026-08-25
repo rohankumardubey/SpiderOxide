@@ -16,6 +16,7 @@ from .backend import (
     resolve_backend,
 )
 from .crawler import Crawler, CrawlerRunner
+from .depth import DepthMiddleware
 from .downloader import Downloader, HttpxDownloader, RustDownloader
 from .engine import CrawlResult, NativeCrawlEngine
 from .exceptions import (
@@ -46,6 +47,7 @@ __all__ = [
     "CrawlResult",
     "DownloadError",
     "Downloader",
+    "DepthMiddleware",
     "DropItem",
     "DupeFilter",
     "FingerprintRequest",
