@@ -1,19 +1,21 @@
+use std::collections::HashMap;
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use async_compression::tokio::bufread::{BrotliDecoder, GzipDecoder, ZlibDecoder, ZstdDecoder};
 use futures_util::TryStreamExt;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use reqwest::Url;
 use reqwest::cookie::{CookieStore, Jar};
 use reqwest::header::{
     ACCEPT_ENCODING, CONTENT_ENCODING, COOKIE, HeaderMap, HeaderName, HeaderValue,
+    PROXY_AUTHORIZATION,
 };
-use reqwest::{Client, Method, Response, Version, redirect};
+use reqwest::{Client, ClientBuilder, Method, Proxy, Response, Version, redirect};
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
 use tokio_util::io::StreamReader;
 
@@ -104,6 +106,51 @@ fn merge_stored_cookies(headers: &mut HeaderMap, cookie_jar: &Jar, url: &str) ->
     Ok(())
 }
 
+fn client_builder(cookie_jar: Arc<Jar>, user_agent: Option<&str>) -> ClientBuilder {
+    let mut default_headers = HeaderMap::new();
+    default_headers.insert(
+        ACCEPT_ENCODING,
+        HeaderValue::from_static("gzip, br, deflate, zstd"),
+    );
+    let mut builder = Client::builder()
+        .cookie_provider(cookie_jar)
+        .default_headers(default_headers)
+        .redirect(redirect::Policy::none())
+        .no_proxy();
+    if let Some(user_agent) = user_agent.filter(|value| !value.is_empty()) {
+        builder = builder.user_agent(user_agent);
+    }
+    builder
+}
+
+fn build_client(
+    cookie_jar: Arc<Jar>,
+    user_agent: Option<&str>,
+    proxy: Option<(&str, Option<&[u8]>)>,
+) -> PyResult<Client> {
+    let mut builder = client_builder(cookie_jar, user_agent);
+    if let Some((url, authorization)) = proxy {
+        let mut configured = Proxy::all(url)
+            .map_err(|error| download_error(format!("invalid proxy URL: {error}")))?;
+        if let Some(authorization) = authorization {
+            let header = HeaderValue::from_bytes(authorization).map_err(|error| {
+                download_error(format!("invalid Proxy-Authorization header: {error}"))
+            })?;
+            configured = configured.custom_http_auth(header);
+        }
+        builder = builder.proxy(configured);
+    }
+    builder
+        .build()
+        .map_err(|error| PyValueError::new_err(format!("invalid downloader settings: {error}")))
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+struct ProxyClientKey {
+    url: String,
+    authorization: Option<Vec<u8>>,
+}
+
 #[pyclass(module = "spideroxide._native")]
 pub(crate) struct NativeHttpResponse {
     url: String,
@@ -153,9 +200,44 @@ impl NativeHttpResponse {
 #[pyclass(module = "spideroxide._native")]
 pub(crate) struct NativeHttpClient {
     client: Client,
+    proxy_clients: Mutex<HashMap<ProxyClientKey, Client>>,
     cookie_jar: Arc<Jar>,
+    user_agent: Option<String>,
     max_size: usize,
     timeout: Duration,
+}
+
+impl NativeHttpClient {
+    fn lock_proxy_clients(&self) -> PyResult<MutexGuard<'_, HashMap<ProxyClientKey, Client>>> {
+        self.proxy_clients
+            .lock()
+            .map_err(|_| PyRuntimeError::new_err("native proxy client pool was poisoned"))
+    }
+
+    fn client_for_proxy(
+        &self,
+        proxy: Option<&str>,
+        authorization: Option<&[u8]>,
+    ) -> PyResult<Client> {
+        let Some(proxy) = proxy else {
+            return Ok(self.client.clone());
+        };
+        let key = ProxyClientKey {
+            url: proxy.to_owned(),
+            authorization: authorization.map(<[u8]>::to_vec),
+        };
+        let mut clients = self.lock_proxy_clients()?;
+        if let Some(client) = clients.get(&key) {
+            return Ok(client.clone());
+        }
+        let client = build_client(
+            self.cookie_jar.clone(),
+            self.user_agent.as_deref(),
+            Some((proxy, authorization)),
+        )?;
+        clients.insert(key, client.clone());
+        Ok(client)
+    }
 }
 
 #[pymethods]
@@ -172,30 +254,20 @@ impl NativeHttpClient {
             ));
         }
 
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(
-            ACCEPT_ENCODING,
-            HeaderValue::from_static("gzip, br, deflate, zstd"),
-        );
         let cookie_jar = Arc::new(Jar::default());
-        let mut builder = Client::builder()
-            .cookie_provider(cookie_jar.clone())
-            .default_headers(default_headers)
-            .redirect(redirect::Policy::none());
-        if let Some(user_agent) = user_agent.filter(|value| !value.is_empty()) {
-            builder = builder.user_agent(user_agent);
-        }
-        let client = builder.build().map_err(|error| {
-            PyValueError::new_err(format!("invalid downloader settings: {error}"))
-        })?;
+        let user_agent = user_agent.map(str::to_owned);
+        let client = build_client(cookie_jar.clone(), user_agent.as_deref(), None)?;
         Ok(Self {
             client,
+            proxy_clients: Mutex::new(HashMap::new()),
             cookie_jar,
+            user_agent,
             max_size,
             timeout,
         })
     }
 
+    #[pyo3(signature = (url, method, headers, body, proxy = None))]
     fn fetch<'py>(
         &self,
         py: Python<'py>,
@@ -203,8 +275,14 @@ impl NativeHttpClient {
         method: String,
         headers: Vec<(String, Vec<u8>)>,
         body: Vec<u8>,
+        proxy: Option<(String, Option<Vec<u8>>)>,
     ) -> PyResult<Bound<'py, PyAny>> {
-        let client = self.client.clone();
+        let client = self.client_for_proxy(
+            proxy.as_ref().map(|(url, _)| url.as_str()),
+            proxy
+                .as_ref()
+                .and_then(|(_, authorization)| authorization.as_deref()),
+        )?;
         let cookie_jar = self.cookie_jar.clone();
         let max_size = self.max_size;
         let timeout = self.timeout;
@@ -222,6 +300,7 @@ impl NativeHttpClient {
                 })?;
                 parsed_headers.append(parsed_name, parsed_value);
             }
+            parsed_headers.remove(PROXY_AUTHORIZATION);
             merge_stored_cookies(&mut parsed_headers, &cookie_jar, &url)?;
 
             let request = client
@@ -305,5 +384,10 @@ impl NativeHttpClient {
                 )
             })
         })
+    }
+
+    #[getter]
+    fn proxy_client_count(&self) -> PyResult<usize> {
+        Ok(self.lock_proxy_clients()?.len())
     }
 }
