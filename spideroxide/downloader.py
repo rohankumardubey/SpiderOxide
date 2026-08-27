@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Iterable
+from http.cookiejar import CookieJar
 from typing import Protocol
 
 import httpx
@@ -58,6 +59,24 @@ def _response(
     )
 
 
+def _proxy_details(request: Request) -> tuple[str | None, bytes | None]:
+    proxy = request.meta.get("proxy")
+    if proxy is None:
+        return None, None
+    if not isinstance(proxy, str):
+        raise DownloadError("request.meta['proxy'] must be a string or None")
+    authorization = request.headers.get("Proxy-Authorization")
+    return proxy, authorization
+
+
+def _transport_headers(request: Request) -> list[tuple[str, str]]:
+    return [
+        (name, value)
+        for name, value in request.headers.to_http_pairs()
+        if name.lower() != "proxy-authorization"
+    ]
+
+
 class HttpxDownloader:
     def __init__(
         self,
@@ -67,20 +86,58 @@ class HttpxDownloader:
     ) -> None:
         self.settings = settings or Settings()
         timeout, self.max_size, user_agent = _download_settings(self.settings)
-        self.client = httpx.AsyncClient(
-            timeout=timeout,
+        self._timeout = timeout
+        self._user_agent = user_agent
+        self._transport = transport
+        self._cookie_jar = CookieJar()
+        self.client = self._create_client()
+        self._proxy_clients: dict[tuple[str, bytes | None], httpx.AsyncClient] = {}
+
+    def _create_client(
+        self,
+        proxy: str | None = None,
+        authorization: bytes | None = None,
+    ) -> httpx.AsyncClient:
+        proxy_config = (
+            None
+            if proxy is None
+            else httpx.Proxy(
+                proxy,
+                headers=(
+                    None if authorization is None else [(b"Proxy-Authorization", authorization)]
+                ),
+            )
+        )
+        return httpx.AsyncClient(
+            timeout=self._timeout,
             follow_redirects=False,
-            headers={"User-Agent": user_agent} if user_agent else None,
-            transport=transport,
+            headers={"User-Agent": self._user_agent} if self._user_agent else None,
+            cookies=self._cookie_jar,
+            transport=self._transport,
+            proxy=proxy_config,
+            trust_env=False,
         )
 
     async def fetch(self, request: Request) -> Response:
+        proxy, authorization = _proxy_details(request)
+        if proxy is None:
+            client = self.client
+        else:
+            key = (proxy, authorization)
+            client = self._proxy_clients.get(key)
+            if client is None:
+                try:
+                    client = self._create_client(proxy, authorization)
+                except (TypeError, ValueError) as error:
+                    raise DownloadError(f"invalid proxy URL: {error}") from error
+                self._proxy_clients[key] = client
+
         started = asyncio.get_running_loop().time()
         try:
-            async with self.client.stream(
+            async with client.stream(
                 request.method,
                 request.url,
-                headers=request.headers.to_http_pairs(),
+                headers=_transport_headers(request),
                 content=request.body or None,
                 cookies=request.cookies,
             ) as raw_response:
@@ -110,7 +167,9 @@ class HttpxDownloader:
             raise DownloadError(f"unable to download {request.url}: {error}") from error
 
     async def close(self) -> None:
-        await self.client.aclose()
+        clients = [self.client, *self._proxy_clients.values()]
+        self._proxy_clients.clear()
+        await asyncio.gather(*(client.aclose() for client in clients))
 
 
 def _request_headers(request: Request) -> list[tuple[str, bytes]]:
@@ -153,12 +212,14 @@ class RustDownloader:
         client = self._client
         if client is None:
             raise RuntimeError("downloader is closed")
+        proxy, authorization = _proxy_details(request)
         try:
             raw_response = await client.fetch(
                 request.url,
                 request.method,
                 _request_headers(request),
                 request.body,
+                None if proxy is None else (proxy, authorization),
             )
         except self._download_error as error:
             raise DownloadError(str(error)) from error

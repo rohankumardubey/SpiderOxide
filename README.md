@@ -45,6 +45,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Item pipelines, signals, settings, and crawl statistics
 * Streaming HTTP downloads with repeated header support
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
+* Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
 * Safe Rust with no unsafe blocks
 
 ## Installation
@@ -133,6 +134,34 @@ result = asyncio.run(
 
 `ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
 requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
+
+## Proxy support
+
+SpiderOxide enables a Scrapy-compatible `HttpProxyMiddleware` by default. Set `proxy` in request
+metadata to route one request through an HTTP or HTTPS proxy:
+
+```python
+from spideroxide import Request
+
+
+request = Request(
+    "https://example.com/private",
+    meta={"proxy": "http://username:password@proxy.example.com:8080"},
+)
+```
+
+Proxy credentials are removed from the normalized metadata URL and sent only as proxy
+authentication. Redirected and retried requests retain the selected proxy. Set
+`request.meta["proxy"]` to `None` to bypass proxy discovery for one request.
+
+When no explicit proxy is present, SpiderOxide discovers standard `http_proxy`, `https_proxy`, and
+`no_proxy` configuration from the environment and operating system. Set `HTTPPROXY_ENABLED` to
+`False` to disable this behavior. `HTTPPROXY_AUTH_ENCODING` controls Basic authentication encoding
+and defaults to `latin-1`.
+
+Both downloaders pool connections separately for each proxy and authentication identity. The Rust
+downloader owns its Reqwest proxy-client pool and applies `Proxy-Authorization` at the proxy layer so
+credentials are not forwarded to direct target servers. SOCKS proxies are not currently supported.
 
 ## Selectors
 
@@ -350,6 +379,7 @@ The validation suite compares:
 * retry status codes, exceptions, limits, opt-outs, request overrides, stats, and engine parity
 * native policy ownership, exception inheritance, arbitrary priorities, fallback, and extension stats
 * request depth limits, priority adjustments, verbose stats, arbitrary integers, and engine parity
+* explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -367,6 +397,7 @@ python benchmark/verify_native_policy.py
 python benchmark/verify_depth.py
 python benchmark/verify_native_slots.py
 python benchmark/verify_redirect.py
+python benchmark/verify_proxy.py
 python benchmark/verify_native_robots.py
 ```
 
@@ -493,6 +524,7 @@ python benchmark/verify_native_policy.py
 python benchmark/verify_depth.py
 python benchmark/verify_native_slots.py
 python benchmark/verify_redirect.py
+python benchmark/verify_proxy.py
 python benchmark/verify_native_robots.py
 ```
 
@@ -506,8 +538,9 @@ memory, and the URL canonicalizer intentionally implements a smaller contract th
 The current foundation includes Python and Rust crawl coordination, HTTP models, Python and Rust
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
 filtering, scheduling, selectors, and Rust-owned retry, request depth, robots, download slot, and
-downloader statistics policies. It does not yet include persistent job state, feed exports,
-extensions, proxy support, or Scrapy command-line compatibility.
+downloader statistics policies. The native downloader also owns authenticated per-proxy connection
+pools. SpiderOxide does not yet include persistent job state, feed exports, extensions, SOCKS proxy
+support, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.

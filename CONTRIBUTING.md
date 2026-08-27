@@ -44,6 +44,7 @@ python benchmark/verify_native_policy.py
 python benchmark/verify_depth.py
 python benchmark/verify_native_slots.py
 python benchmark/verify_redirect.py
+python benchmark/verify_proxy.py
 python benchmark/verify_native_robots.py
 ```
 

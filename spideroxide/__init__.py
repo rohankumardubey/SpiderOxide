@@ -29,6 +29,7 @@ from .exceptions import (
 )
 from .headers import Headers
 from .http import Request, Response, TextResponse
+from .proxy import HttpProxyMiddleware
 from .retry import RetryMiddleware, get_retry_request
 from .selectors import Selector, SelectorList
 from .settings import Settings
@@ -54,6 +55,7 @@ __all__ = [
     "Headers",
     "IgnoreRequest",
     "HttpxDownloader",
+    "HttpProxyMiddleware",
     "NotConfigured",
     "NativeCrawlEngine",
     "PriorityRequest",

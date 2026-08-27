@@ -89,6 +89,9 @@ jobs:
       - name: Verify redirect middleware
         run: .venv/bin/python benchmark/verify_redirect.py
 
+      - name: Verify proxy middleware
+        run: .venv/bin/python benchmark/verify_proxy.py
+
       - name: Verify native robots policy
         run: .venv/bin/python benchmark/verify_native_robots.py
 
