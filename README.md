@@ -46,6 +46,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Streaming HTTP downloads with repeated header support
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
+* Priority-ordered Scrapy-compatible extensions and lifecycle signals
 * Safe Rust with no unsafe blocks
 
 ## Installation
@@ -162,6 +163,44 @@ and defaults to `latin-1`.
 Both downloaders pool connections separately for each proxy and authentication identity. The Rust
 downloader owns its Reqwest proxy-client pool and applies `Proxy-Authorization` at the proxy layer so
 credentials are not forwarded to direct target servers. SOCKS proxies are not currently supported.
+
+## Extensions
+
+Extensions are configured through the Scrapy-compatible `EXTENSIONS` setting. Values are numeric
+priorities, and lower values are initialized first. Each extension can define `from_crawler()` to
+read settings, retain crawler services, and connect synchronous or asynchronous signal handlers.
+
+```python
+from spideroxide import signals
+
+
+class ItemCounterExtension:
+    @classmethod
+    def from_crawler(cls, crawler):
+        extension = cls()
+        extension.count = 0
+        crawler.signals.connect(extension.item_scraped, signals.item_scraped)
+        return extension
+
+    def item_scraped(self, item, spider):
+        self.count += 1
+
+
+settings = {
+    "EXTENSIONS": {
+        ItemCounterExtension: 500,
+    },
+}
+```
+
+Extension references may be classes, import paths, or existing instances. Raising `NotConfigured`
+from a factory skips that extension. `EXTENSIONS_BASE` provides framework defaults, and assigning
+`None` to the same reference in `EXTENSIONS` disables a base extension. Loaded instances are
+available from `crawler.extensions`, including iteration and `get_by_type()` inspection.
+
+Extensions receive the same engine, spider, request, response, item, and error signals on both crawl
+engines. With the Rust engine selected, scheduling and runtime policy state remain in Rust while
+extensions run as Python observers through the public signal API.
 
 ## Selectors
 
@@ -380,6 +419,7 @@ The validation suite compares:
 * native policy ownership, exception inheritance, arbitrary priorities, fallback, and extension stats
 * request depth limits, priority adjustments, verbose stats, arbitrary integers, and engine parity
 * explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
+* extension priorities, overrides, factories, opt-outs, async hooks, lifecycle order, and parity
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -389,6 +429,7 @@ Run it with:
 ```bash
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_extensions.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
@@ -516,6 +557,7 @@ maturin develop -r
 python benchmark/verify_integration.py
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_extensions.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
@@ -539,8 +581,8 @@ The current foundation includes Python and Rust crawl coordination, HTTP models,
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
 filtering, scheduling, selectors, and Rust-owned retry, request depth, robots, download slot, and
 downloader statistics policies. The native downloader also owns authenticated per-proxy connection
-pools. SpiderOxide does not yet include persistent job state, feed exports, extensions, SOCKS proxy
-support, or Scrapy command-line compatibility.
+pools. SpiderOxide does not yet include persistent job state, feed exports, built-in operational
+extensions, SOCKS proxy support, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.

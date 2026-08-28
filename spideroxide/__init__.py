@@ -27,6 +27,7 @@ from .exceptions import (
     NotConfigured,
     SpiderOxideError,
 )
+from .extensions import ExtensionManager
 from .headers import Headers
 from .http import Request, Response, TextResponse
 from .proxy import HttpProxyMiddleware
@@ -51,6 +52,7 @@ __all__ = [
     "DepthMiddleware",
     "DropItem",
     "DupeFilter",
+    "ExtensionManager",
     "FingerprintRequest",
     "Headers",
     "IgnoreRequest",

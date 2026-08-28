@@ -39,6 +39,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     },
     "SPIDER_MIDDLEWARES": [],
     "ITEM_PIPELINES": [],
+    "EXTENSIONS_BASE": {},
+    "EXTENSIONS": {},
     "DEPTH_LIMIT": 0,
     "DEPTH_PRIORITY": 0,
     "DEPTH_STATS_VERBOSE": False,

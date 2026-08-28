@@ -50,6 +50,10 @@ def merged_component_references(base: object, custom: object) -> list[object]:
             merged[identity] = priority
             if isinstance(reference, str):
                 base_paths[reference] = identity
+            module = getattr(identity, "__module__", None)
+            qualname = getattr(identity, "__qualname__", None)
+            if module is not None and qualname is not None:
+                base_paths[f"{module}.{qualname}"] = identity
         for reference, priority in custom.items():
             if priority is None:
                 identity = base_paths.get(reference) if isinstance(reference, str) else reference

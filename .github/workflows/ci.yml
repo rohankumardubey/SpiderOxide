@@ -65,6 +65,9 @@ jobs:
       - name: Verify crawler foundation
         run: .venv/bin/python benchmark/verify_crawler.py
 
+      - name: Verify extensions
+        run: .venv/bin/python benchmark/verify_extensions.py
+
       - name: Verify native downloader
         run: .venv/bin/python benchmark/verify_native_downloader.py
 

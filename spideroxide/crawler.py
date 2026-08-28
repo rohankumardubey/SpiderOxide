@@ -5,6 +5,7 @@ from typing import Any
 
 from .downloader import Downloader, create_downloader
 from .engine import CrawlEngine, CrawlResult, create_engine
+from .extensions import ExtensionManager
 from .settings import Settings
 from .signals import SignalManager
 from .spider import Spider
@@ -28,6 +29,7 @@ class Crawler:
         self.downloader = downloader
         self.spider: Spider | None = None
         self.engine: CrawlEngine | None = None
+        self.extensions: ExtensionManager | None = None
         self.native_policy_runtime: object | None = None
         self.native_depth_policy: object | None = None
         self.native_download_slots: object | None = None
@@ -37,19 +39,21 @@ class Crawler:
         if self.spider is not None:
             raise RuntimeError("Crawler instances cannot be reused")
         self.spider = self.spider_cls.from_crawler(self, *args, **kwargs)
-        self.settings.freeze()
-        downloader = self.downloader or create_downloader(self.settings)
+        downloader = self.downloader
         try:
+            self.extensions = ExtensionManager.from_crawler(self)
+            self.settings.freeze()
+            downloader = downloader or create_downloader(self.settings)
             self.engine = create_engine(self, self.spider, downloader)
         except BaseException:
-            close = getattr(downloader, "close", None)
+            close = getattr(downloader, "close", None) if downloader is not None else None
             if close is not None:
                 try:
                     await maybe_await(close())
                 except Exception:
                     self.stats.inc_value("teardown_errors/count")
                     self.spider.logger.exception(
-                        "Error closing downloader after engine construction failed"
+                        "Error closing downloader after crawler construction failed"
                     )
             raise
         return await self.engine.crawl()
