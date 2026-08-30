@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections import deque
 from collections.abc import Iterable, Sequence
 
 from .backend import BackendChoice, BackendImplementation, resolve_backend
@@ -88,7 +87,8 @@ class Scheduler:
     def __init__(self, backend: BackendChoice | str | None = None) -> None:
         self._backend: BackendImplementation = resolve_backend(backend)
         self._implementation = self._backend.scheduler_type()
-        self._original_requests: dict[tuple[bytes, int], deque[PriorityRequest]] = {}
+        self._original_requests: dict[int, PriorityRequest] = {}
+        self._next_sequence = 0
 
     @property
     def backend_name(self) -> str:
@@ -101,53 +101,54 @@ class Scheduler:
         body: bytes = b"",
         priority: int = 0,
     ) -> bool:
-        return bool(self._implementation.push(url, method, body, priority))
+        inserted = bool(self._implementation.push(url, method, body, priority))
+        self._record_sequences((inserted,))
+        return inserted
 
     def push_request(self, request: PriorityRequest) -> bool:
         data = request_data(request)
-        inserted = (
-            bool(self._implementation.push_unchecked(*data))
+        inserted = bool(
+            self._implementation.push_unchecked(*data)
             if _bypass_duplicate_filter(request)
-            else self.push(*data)
+            else self._implementation.push(*data)
         )
-        if inserted:
-            request_fingerprint = self._backend.fingerprint(data[0], data[1], data[2])
-            key = (request_fingerprint, request.priority)
-            self._original_requests.setdefault(key, deque()).append(request)
+        sequence = self._record_sequences((inserted,))[0]
+        if sequence is not None:
+            self._original_requests[sequence] = request
         return inserted
 
     def push_batch(self, requests: Iterable[Sequence[object]]) -> list[bool]:
-        return list(self._implementation.push_batch(list(requests)))
+        inserted = list(self._implementation.push_batch(list(requests)))
+        self._record_sequences(inserted)
+        return inserted
 
     def push_requests(self, requests: Iterable[PriorityRequest]) -> list[bool]:
         originals = list(requests)
         if any(_bypass_duplicate_filter(request) for request in originals):
             return [self.push_request(request) for request in originals]
         data = [request_data(request) for request in originals]
-        inserted = self.push_batch(data)
-        fingerprints = self._backend.fingerprint_batch(data)
-        for request, request_fingerprint, accepted in zip(
-            originals, fingerprints, inserted, strict=True
-        ):
-            if accepted:
-                key = (request_fingerprint, request.priority)
-                self._original_requests.setdefault(key, deque()).append(request)
+        inserted = list(self._implementation.push_batch(data))
+        sequences = self._record_sequences(inserted)
+        for request, sequence in zip(originals, sequences, strict=True):
+            if sequence is not None:
+                self._original_requests[sequence] = request
         return inserted
 
+    def _record_sequences(self, inserted: Iterable[bool]) -> list[int | None]:
+        sequences = []
+        for accepted in inserted:
+            if not accepted:
+                sequences.append(None)
+                continue
+            sequences.append(self._next_sequence)
+            self._next_sequence += 1
+        return sequences
+
     def _restore_request(self, request: ScheduledRequest) -> ScheduledRequest:
-        request_fingerprint = self._backend.fingerprint(
-            request.url,
-            request.method,
-            bytes(request.body),
-        )
-        key = (request_fingerprint, request.priority)
-        originals = self._original_requests.get(key)
-        if not originals:
+        sequence = getattr(request, "sequence", None)
+        if not isinstance(sequence, int):
             return request
-        original = originals.popleft()
-        if not originals:
-            del self._original_requests[key]
-        return original
+        return self._original_requests.pop(sequence, request)
 
     def pop(self) -> ScheduledRequest | None:
         request = self._implementation.pop()

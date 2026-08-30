@@ -192,6 +192,18 @@ def _verify_scheduler_identity() -> None:
         assert scheduler.pop() is high
         assert scheduler.pop() is low
 
+        mixed = Scheduler(backend)
+        raw_url = "https://example.test/raw"
+        assert mixed.push(raw_url, priority=1)
+        assert not mixed.push(raw_url, priority=99)
+        first = Request("https://example.test/first", priority=2)
+        second = Request("https://example.test/second", priority=3)
+        assert mixed.push_requests([first, second]) == [True, True]
+        restored = mixed.pop_batch(3)
+        assert restored[0] is second
+        assert restored[1] is first
+        assert restored[2].url == raw_url
+
 
 def _verify_settings() -> None:
     settings = Settings({"VALUE": "project"})

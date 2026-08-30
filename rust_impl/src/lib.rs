@@ -137,6 +137,7 @@ struct Request {
     method: String,
     body: Vec<u8>,
     priority: i64,
+    sequence: u64,
 }
 
 #[pymethods]
@@ -159,6 +160,11 @@ impl Request {
     #[getter]
     fn priority(&self) -> i64 {
         self.priority
+    }
+
+    #[getter]
+    fn sequence(&self) -> u64 {
+        self.sequence
     }
 
     fn __repr__(&self) -> String {
@@ -221,6 +227,7 @@ impl RustScheduler {
                 method,
                 body,
                 priority,
+                sequence,
             },
         });
         Ok(true)
