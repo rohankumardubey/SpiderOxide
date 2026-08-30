@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::mem;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -9,6 +10,7 @@ use pyo3::prelude::*;
 use tokio::sync::Notify;
 
 use crate::fingerprint_bytes;
+use crate::job::PersistentJobStore;
 
 #[derive(Debug, Eq, PartialEq)]
 struct CoordinatorQueueEntry {
@@ -38,24 +40,73 @@ struct CoordinatorState {
     active: HashSet<u64>,
     next_request_id: u64,
     next_sequence: u64,
+    recovered: Vec<(u64, Vec<u8>)>,
+    persistent_ids: HashSet<u64>,
+    job_store: Option<PersistentJobStore>,
+    persistence_enabled: bool,
     input_closed: bool,
     finished: bool,
     aborted: bool,
 }
 
 impl CoordinatorState {
-    fn new() -> Self {
-        Self {
-            fingerprints: HashSet::new(),
+    fn new(job_dir: Option<&str>) -> PyResult<Self> {
+        let (job_store, recovered_requests, fingerprints) = if let Some(path) = job_dir {
+            let store = PersistentJobStore::open(path)?;
+            let requests = store.load_requests()?;
+            let fingerprints = store.load_fingerprints()?;
+            (Some(store), requests, fingerprints)
+        } else {
+            (None, Vec::new(), HashSet::new())
+        };
+        let mut queue = BinaryHeap::new();
+        let mut recovered = Vec::with_capacity(recovered_requests.len());
+        let mut persistent_ids = HashSet::with_capacity(recovered_requests.len());
+        let mut next_request_id = 0;
+        let mut next_sequence = 0;
+        for request in recovered_requests {
+            let priority = BigInt::from_str(&request.priority).map_err(|_| {
+                PyRuntimeError::new_err(format!(
+                    "persistent request {} has an invalid priority",
+                    request.request_id
+                ))
+            })?;
+            next_request_id = next_request_id.max(
+                request
+                    .request_id
+                    .checked_add(1)
+                    .ok_or_else(|| PyOverflowError::new_err("request identifier exhausted"))?,
+            );
+            next_sequence = next_sequence.max(
+                request
+                    .sequence
+                    .checked_add(1)
+                    .ok_or_else(|| PyOverflowError::new_err("scheduler sequence exhausted"))?,
+            );
+            queue.push(CoordinatorQueueEntry {
+                priority,
+                sequence: request.sequence,
+                request_id: request.request_id,
+            });
+            persistent_ids.insert(request.request_id);
+            recovered.push((request.request_id, request.payload));
+        }
+        let persistence_enabled = job_store.is_some();
+        Ok(Self {
+            fingerprints,
             staged: HashMap::new(),
-            queue: BinaryHeap::new(),
+            queue,
             active: HashSet::new(),
-            next_request_id: 0,
-            next_sequence: 0,
+            next_request_id,
+            next_sequence,
+            recovered,
+            persistent_ids,
+            job_store,
+            persistence_enabled,
             input_closed: false,
             finished: false,
             aborted: false,
-        }
+        })
     }
 }
 
@@ -78,7 +129,8 @@ impl NativeCrawlCoordinator {
 #[pymethods]
 impl NativeCrawlCoordinator {
     #[new]
-    fn new(concurrency: usize, pending_limit: usize) -> PyResult<Self> {
+    #[pyo3(signature = (concurrency, pending_limit, job_dir = None))]
+    fn new(concurrency: usize, pending_limit: usize, job_dir: Option<&str>) -> PyResult<Self> {
         if concurrency == 0 {
             return Err(PyValueError::new_err("concurrency must be at least 1"));
         }
@@ -86,14 +138,21 @@ impl NativeCrawlCoordinator {
             return Err(PyValueError::new_err("pending limit must be at least 1"));
         }
         Ok(Self {
-            state: Arc::new(Mutex::new(CoordinatorState::new())),
+            state: Arc::new(Mutex::new(CoordinatorState::new(job_dir)?)),
             notify: Arc::new(Notify::new()),
             concurrency,
             pending_limit,
         })
     }
 
-    #[pyo3(signature = (url, method, body, priority = "0", filter_duplicates = true))]
+    #[pyo3(signature = (
+        url,
+        method,
+        body,
+        priority = "0",
+        filter_duplicates = true,
+        payload = None
+    ))]
     fn schedule(
         &self,
         url: &str,
@@ -101,6 +160,7 @@ impl NativeCrawlCoordinator {
         body: &[u8],
         priority: &str,
         filter_duplicates: bool,
+        payload: Option<&[u8]>,
     ) -> PyResult<Option<u64>> {
         let fingerprint = fingerprint_bytes(url, method, body)?;
         let priority = BigInt::from_str(priority)
@@ -118,7 +178,7 @@ impl NativeCrawlCoordinator {
                     "native crawl coordinator is finished",
                 ));
             }
-            if filter_duplicates && !state.fingerprints.insert(fingerprint) {
+            if filter_duplicates && state.fingerprints.contains(&fingerprint) {
                 return Ok(None);
             }
 
@@ -132,6 +192,25 @@ impl NativeCrawlCoordinator {
                 .next_sequence
                 .checked_add(1)
                 .ok_or_else(|| PyOverflowError::new_err("scheduler sequence exhausted"))?;
+            let priority_text = priority.to_string();
+            let persisted = state.persistence_enabled && payload.is_some();
+            if let Some(store) = state.job_store.as_mut()
+                && !store.schedule(
+                    request_id,
+                    sequence,
+                    &priority_text,
+                    payload,
+                    filter_duplicates.then_some(&fingerprint),
+                )?
+            {
+                return Ok(None);
+            }
+            if filter_duplicates {
+                state.fingerprints.insert(fingerprint);
+            }
+            if persisted {
+                state.persistent_ids.insert(request_id);
+            }
             state.staged.insert(
                 request_id,
                 CoordinatorQueueEntry {
@@ -222,6 +301,24 @@ impl NativeCrawlCoordinator {
     fn complete(&self, request_id: u64) -> PyResult<()> {
         {
             let mut state = self.lock_state()?;
+            if !state.active.contains(&request_id) {
+                return Err(PyValueError::new_err(format!(
+                    "request {request_id} is not active"
+                )));
+            }
+            if let Some(store) = state.job_store.as_mut() {
+                store.complete(request_id)?;
+            }
+            state.active.remove(&request_id);
+            state.persistent_ids.remove(&request_id);
+        }
+        self.notify.notify_waiters();
+        Ok(())
+    }
+
+    fn release(&self, request_id: u64) -> PyResult<()> {
+        {
+            let mut state = self.lock_state()?;
             if !state.active.remove(&request_id) {
                 return Err(PyValueError::new_err(format!(
                     "request {request_id} is not active"
@@ -252,6 +349,48 @@ impl NativeCrawlCoordinator {
         Ok(())
     }
 
+    fn take_recovered(&self) -> PyResult<Vec<(u64, Vec<u8>)>> {
+        Ok(mem::take(&mut self.lock_state()?.recovered))
+    }
+
+    fn is_persistent(&self, request_id: u64) -> PyResult<bool> {
+        Ok(self.lock_state()?.persistent_ids.contains(&request_id))
+    }
+
+    fn load_spider_state(&self) -> PyResult<Option<Vec<u8>>> {
+        let state = self.lock_state()?;
+        match state.job_store.as_ref() {
+            Some(store) => store.load_spider_state(),
+            None => Ok(None),
+        }
+    }
+
+    fn save_spider_state(&self, payload: &[u8]) -> PyResult<bool> {
+        let mut state = self.lock_state()?;
+        match state.job_store.as_mut() {
+            Some(store) => {
+                store.save_spider_state(payload)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    fn close(&self) -> PyResult<()> {
+        let store = {
+            let mut state = self.lock_state()?;
+            state.aborted = true;
+            state.staged.clear();
+            state.queue.clear();
+            state.job_store.take()
+        };
+        self.notify.notify_waiters();
+        if let Some(store) = store {
+            store.close()?;
+        }
+        Ok(())
+    }
+
     #[getter]
     fn queued_count(&self) -> PyResult<usize> {
         let state = self.lock_state()?;
@@ -266,5 +405,15 @@ impl NativeCrawlCoordinator {
     #[getter]
     fn seen_count(&self) -> PyResult<usize> {
         Ok(self.lock_state()?.fingerprints.len())
+    }
+
+    #[getter]
+    fn recovered_count(&self) -> PyResult<usize> {
+        Ok(self.lock_state()?.recovered.len())
+    }
+
+    #[getter]
+    fn persistent(&self) -> PyResult<bool> {
+        Ok(self.lock_state()?.persistence_enabled)
     }
 }

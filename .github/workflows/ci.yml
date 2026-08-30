@@ -77,6 +77,9 @@ jobs:
       - name: Verify native engine
         run: .venv/bin/python benchmark/verify_native_engine.py
 
+      - name: Verify persistent job state
+        run: .venv/bin/python benchmark/verify_job_state.py
+
       - name: Verify selectors
         run: .venv/bin/python benchmark/verify_selectors.py
 

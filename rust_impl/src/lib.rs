@@ -4,6 +4,7 @@ use std::collections::{BinaryHeap, HashSet};
 mod depth;
 mod downloader;
 mod engine;
+mod job;
 mod policy;
 mod robots;
 mod slots;

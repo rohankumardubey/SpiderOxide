@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -10,6 +11,12 @@ from .backend import BackendUnavailableError
 from .downloader import Downloader
 from .exceptions import CloseSpider, DropItem, IgnoreRequest
 from .http import Request, Response
+from .job import (
+    deserialize_request,
+    deserialize_spider_state,
+    serialize_request,
+    serialize_spider_state,
+)
 from .middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
@@ -331,13 +338,38 @@ class NativeCrawlEngine(CrawlEngine):
             settings.getbool("DEPTH_STATS_VERBOSE"),
         )
         robots_runtime = NativeRobotsRuntime()
-        coordinator = NativeCrawlCoordinator(concurrency, pending_limit)
+        configured_job_dir = settings.get("JOBDIR")
+        job_dir = (
+            os.path.abspath(os.path.expanduser(os.fspath(configured_job_dir)))
+            if configured_job_dir
+            else None
+        )
+        coordinator = NativeCrawlCoordinator(concurrency, pending_limit, job_dir)
         crawler.native_policy_runtime = policy_runtime
         crawler.native_depth_policy = depth_policy
         crawler.native_robots_runtime = robots_runtime
         try:
             super().__init__(crawler, spider, downloader)
+            self.scheduler = coordinator
+            self._requests: dict[int, Request] = {}
+            self._persistent_request_ids: set[int] = set()
+            self._job_dir = job_dir
+            self._log_unserializable = settings.getbool("SCHEDULER_DEBUG")
+            self._unserializable_logged = False
+            recovered = coordinator.take_recovered()
+            for request_id, payload in recovered:
+                self._requests[request_id] = deserialize_request(payload, spider)
+                self._persistent_request_ids.add(request_id)
+            if recovered:
+                self.stats.inc_value("scheduler/recovered", len(recovered))
+                spider.logger.info("Resuming crawl (%d requests scheduled)", len(recovered))
+            if job_dir is not None:
+                persisted_state = coordinator.load_spider_state()
+                spider.state = (
+                    deserialize_spider_state(persisted_state) if persisted_state is not None else {}
+                )
         except BaseException:
+            coordinator.close()
             crawler.native_policy_runtime = None
             crawler.native_depth_policy = None
             crawler.native_download_slots = None
@@ -346,8 +378,6 @@ class NativeCrawlEngine(CrawlEngine):
         self._native_download_slots_type = NativeDownloadSlots
         self.native_download_slots: NativeDownloadSlots | None = None
         self.native_robots_runtime = robots_runtime
-        self.scheduler = coordinator
-        self._requests: dict[int, Request] = {}
 
     async def crawl(self) -> CrawlResult:
         tasks: set[asyncio.Task[None]] = set()
@@ -382,7 +412,6 @@ class NativeCrawlEngine(CrawlEngine):
                 task.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
-            self._requests.clear()
             if self.native_download_slots is not None:
                 self.native_download_slots.close()
             from .depth import sync_stats as sync_depth_stats
@@ -392,6 +421,11 @@ class NativeCrawlEngine(CrawlEngine):
             sync_robots_stats(self.crawler)
             self.native_robots_runtime.close()
             await self._finish(reason, spider_opened)
+            if self._job_dir is not None:
+                await self._safe_teardown("job/state", self._save_spider_state)
+            await self._safe_teardown("job/close", self.scheduler.close)
+            self._requests.clear()
+            self._persistent_request_ids.clear()
         return CrawlResult(reason, tuple(self.items), dict(self.stats.get_stats()))
 
     async def _produce_native_start_requests(self) -> None:
@@ -413,11 +447,23 @@ class NativeCrawlEngine(CrawlEngine):
                 raise RuntimeError(
                     f"native coordinator returned unknown request {request_id}"
                 ) from error
+            self.stats.inc_value("scheduler/dequeued")
+            storage = "disk" if request_id in self._persistent_request_ids else "memory"
+            self.stats.inc_value(f"scheduler/dequeued/{storage}")
             try:
                 outputs = await self._handle_request(request)
                 await self._process_outputs(outputs)
-            finally:
+            except CloseSpider:
+                self.scheduler.release(request_id)
+                raise
+            except BaseException:
+                self.scheduler.release(request_id)
+                raise
+            else:
                 self.scheduler.complete(request_id)
+            finally:
+                if request_id in self._persistent_request_ids:
+                    self._persistent_request_ids.discard(request_id)
 
     async def _download(self, request: Request) -> Request | Response:
         native_download_slots = self.native_download_slots
@@ -434,17 +480,35 @@ class NativeCrawlEngine(CrawlEngine):
     async def _schedule(self, request: Request) -> bool:
         if not isinstance(request, Request):
             raise TypeError("spider output must contain Request objects or items")
+        payload = None
+        if self._job_dir is not None:
+            try:
+                payload = serialize_request(request, self.spider)
+            except ValueError as error:
+                self.stats.inc_value("scheduler/unserializable")
+                if self._log_unserializable and not self._unserializable_logged:
+                    self._unserializable_logged = True
+                    self.spider.logger.warning(
+                        "Unable to serialize request %r; it will not survive resume: %s",
+                        request,
+                        error,
+                    )
         request_id = self.scheduler.schedule(
             request.url,
             request.method,
             request.body,
             str(request.priority),
             not request.dont_filter,
+            payload,
         )
         inserted = request_id is not None
         if inserted:
             self._requests[request_id] = request
             self.stats.inc_value("scheduler/enqueued")
+            storage = "disk" if self.scheduler.is_persistent(request_id) else "memory"
+            self.stats.inc_value(f"scheduler/enqueued/{storage}")
+            if storage == "disk":
+                self._persistent_request_ids.add(request_id)
             await self.signals.send(
                 signals.request_scheduled,
                 request=request,
@@ -460,15 +524,23 @@ class NativeCrawlEngine(CrawlEngine):
             )
         return inserted
 
+    def _save_spider_state(self) -> None:
+        state = getattr(self.spider, "state", {})
+        self.scheduler.save_spider_state(serialize_spider_state(state))
+
 
 def create_engine(crawler: object, spider: Spider, downloader: Downloader) -> CrawlEngine:
     settings: Settings = crawler.settings  # type: ignore[attr-defined]
     selected = str(settings.get("ENGINE_BACKEND", "python")).strip().lower()
+    if settings.get("JOBDIR") and selected == "python":
+        raise ValueError("JOBDIR requires ENGINE_BACKEND='rust' or 'auto'")
     if selected == "python":
         return CrawlEngine(crawler, spider, downloader)
     if selected == "rust":
         return NativeCrawlEngine(crawler, spider, downloader)
     if selected == "auto":
+        if settings.get("JOBDIR"):
+            return NativeCrawlEngine(crawler, spider, downloader)
         try:
             return NativeCrawlEngine(crawler, spider, downloader)
         except BackendUnavailableError:

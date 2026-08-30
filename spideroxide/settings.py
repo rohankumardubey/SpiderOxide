@@ -16,6 +16,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     "ENGINE_BACKEND": "python",
     "ENGINE_MAX_PENDING": 0,
+    "JOBDIR": None,
+    "SCHEDULER_DEBUG": False,
     "DOWNLOAD_DELAY": 0.0,
     "RANDOMIZE_DOWNLOAD_DELAY": True,
     "DOWNLOAD_SLOTS": {},

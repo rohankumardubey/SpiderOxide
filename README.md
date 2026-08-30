@@ -38,6 +38,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Preservation of the original Python request object
 * Concurrent asynchronous crawl engine
 * Native Tokio crawl coordination with bounded start-request admission
+* Rust-native persistent crawl state with crash recovery
 * Scrapy-compatible CSS, XPath, and JMESPath selectors
 * Rust-owned retry policies and downloader statistics with Scrapy-compatible APIs
 * Scrapy-compatible request depth limits, priorities, and statistics
@@ -136,6 +137,44 @@ result = asyncio.run(
 
 `ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
 requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
+
+## Persistent jobs
+
+Set `JOBDIR` with the Rust engine to make a crawl resumable. The native coordinator stores queued
+and in-flight requests, duplicate fingerprints, priorities, sequence numbers, and spider state in a
+locked SQLite WAL. A restarted crawler restores the frontier before it begins producing new start
+requests.
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "DOWNLOADER_BACKEND": "rust",
+            "JOBDIR": "crawls/example-1",
+        },
+    ).crawl()
+)
+```
+
+`ENGINE_BACKEND="auto"` also selects the native engine when `JOBDIR` is configured and does not
+fall back to the Python engine. Only one crawler may own a job directory at a time. Reusing a
+directory for a different spider or running two processes against it is unsupported.
+
+Serializable requests survive normal cancellation, process termination, and in-flight interruption.
+Callback and errback functions must be bound methods of the running spider so they can be restored
+by name. Request headers, bodies, cookies, metadata, callback keyword arguments, flags, duplicate
+decisions, arbitrary-size priorities, and FIFO order at equal priority are retained.
+
+When a request cannot be serialized, it remains in memory for the current process and increments
+`scheduler/unserializable`, matching Scrapy's fallback behavior. Set `SCHEDULER_DEBUG=True` to log
+the first such request. Memory-only requests do not survive interruption.
+
+With `JOBDIR` enabled, `spider.state` is a dictionary restored before the crawl starts and saved
+after the spider closes. The directory contains Python pickle payloads for user-defined request
+values, so it must be treated with the same trust as source code. Start a new job directory after
+changing incompatible callback names or upgrading across incompatible SpiderOxide versions.
 
 ## Proxy support
 
@@ -459,6 +498,7 @@ The validation suite compares:
 * native redirects, compression, streaming, timeouts, and response limits
 * native priority ordering, duplicate decisions, and request identity
 * native concurrency, backpressure, streaming starts, cancellation, and cleanup
+* native job locking, WAL recovery, callbacks, spider state, hard crashes, and schema checks
 * CSS, XPath, XML namespace, JSON, malformed HTML, encoding, and base URL selector behavior
 * retry status codes, exceptions, limits, opt-outs, request overrides, stats, and engine parity
 * native policy ownership, exception inheritance, arbitrary priorities, fallback, and extension stats
@@ -479,6 +519,7 @@ python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
+python benchmark/verify_job_state.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
@@ -608,6 +649,7 @@ python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
+python benchmark/verify_job_state.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
@@ -622,16 +664,18 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements.
 
 ## Status
 
-SpiderOxide is experimental and does not yet provide full Scrapy compatibility. State is kept in
-memory, and the URL canonicalizer intentionally implements a smaller contract than Scrapy.
+SpiderOxide is experimental and does not yet provide full Scrapy compatibility. Crawls can persist
+native scheduling state through `JOBDIR`, while crawl results and statistics remain in memory. The
+URL canonicalizer intentionally implements a smaller contract than Scrapy.
 
 The current foundation includes Python and Rust crawl coordination, HTTP models, Python and Rust
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
 filtering, scheduling, selectors, and Rust-owned retry, request depth, robots, download slot, and
-downloader statistics policies. The native downloader also owns authenticated per-proxy connection
-pools. Local and standard-output feed exports are available through the built-in feed extension.
-SpiderOxide does not yet include persistent job state, remote feed storage, feed postprocessing,
-built-in operational extensions, SOCKS proxy support, or Scrapy command-line compatibility.
+downloader statistics policies. The native engine also owns persistent request and duplicate state,
+and the native downloader owns authenticated per-proxy connection pools. Local and standard-output
+feed exports are available through the built-in feed extension. SpiderOxide does not yet include
+remote feed storage, feed postprocessing, built-in operational extensions, SOCKS proxy support, or
+Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.
