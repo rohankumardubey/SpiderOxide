@@ -68,6 +68,9 @@ jobs:
       - name: Verify extensions
         run: .venv/bin/python benchmark/verify_extensions.py
 
+      - name: Verify feed exports
+        run: .venv/bin/python benchmark/verify_feed_exports.py
+
       - name: Verify native downloader
         run: .venv/bin/python benchmark/verify_native_downloader.py
 
