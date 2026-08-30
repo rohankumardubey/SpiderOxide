@@ -14,6 +14,7 @@ class Request:
     method: str
     body: bytes
     priority: int
+    sequence: int
 
 
 class PythonScheduler:
@@ -45,9 +46,10 @@ class PythonScheduler:
         return True
 
     def _enqueue(self, url: str, method: str, body: bytes, priority: int) -> None:
-        request = Request(url, method, body, priority)
+        sequence = next(self._sequence)
+        request = Request(url, method, body, priority, sequence)
         # Negating priority makes heapq return larger priorities first; sequence keeps FIFO ties.
-        heapq.heappush(self._queue, (-priority, next(self._sequence), request))
+        heapq.heappush(self._queue, (-priority, sequence, request))
 
     def push_batch(self, requests: Iterable[Sequence[object]]) -> list[bool]:
         return [
