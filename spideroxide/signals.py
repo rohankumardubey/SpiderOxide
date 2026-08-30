@@ -15,6 +15,8 @@ response_received = "response_received"
 item_scraped = "item_scraped"
 item_dropped = "item_dropped"
 spider_error = "spider_error"
+feed_slot_closed = "feed_slot_closed"
+feed_exporter_closed = "feed_exporter_closed"
 
 
 class SignalManager:

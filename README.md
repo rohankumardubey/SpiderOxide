@@ -47,6 +47,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
 * Priority-ordered Scrapy-compatible extensions and lifecycle signals
+* Streaming Scrapy-compatible JSON, JSON Lines, CSV, and XML feed exports
 * Safe Rust with no unsafe blocks
 
 ## Installation
@@ -201,6 +202,50 @@ available from `crawler.extensions`, including iteration and `get_by_type()` ins
 Extensions receive the same engine, spider, request, response, item, and error signals on both crawl
 engines. With the Rust engine selected, scheduling and runtime policy state remain in Rust while
 extensions run as Python observers through the public signal API.
+
+## Feed exports
+
+Configure one or more streaming outputs with Scrapy's `FEEDS` setting. SpiderOxide supports plain
+filesystem paths, `file://` URIs, `pathlib.Path` keys, and `stdout:`. Built-in formats are `json`,
+`jsonlines` with the `jsonl` and `jl` aliases, `csv`, and `xml`.
+
+```python
+settings = {
+    "FEEDS": {
+        "exports/%(name)s-%(time)s.jl": {
+            "format": "jsonlines",
+            "encoding": "utf-8",
+            "fields": ["url", "title"],
+            "overwrite": True,
+        },
+        "exports/%(name)s-%(batch_id)03d.csv": {
+            "format": "csv",
+            "fields": {
+                "url": "URL",
+                "title": "Title",
+            },
+            "batch_item_count": 10_000,
+            "overwrite": True,
+        },
+    },
+}
+```
+
+URI templates provide spider attributes plus `time`, `batch_time`, and `batch_id`. Batched feeds
+must include `%(batch_id)` or `%(batch_time)s` so each batch has a distinct target. Feed options can
+override `fields`, `encoding`, `indent`, `store_empty`, `overwrite`, `uri_params`,
+`item_export_kwargs`, `item_classes`, and `item_filter`. The matching global defaults are
+`FEED_EXPORT_FIELDS`, `FEED_EXPORT_ENCODING`, `FEED_EXPORT_INDENT`, `FEED_STORE_EMPTY`,
+`FEED_EXPORT_BATCH_ITEM_COUNT`, and `FEED_URI_PARAMS`.
+
+Filesystem feeds append by default for Scrapy compatibility. Set `overwrite` to `True` when each
+crawl should replace the previous output. Export completion is observable through
+`signals.feed_slot_closed` and `signals.feed_exporter_closed`; storage outcomes are recorded under
+`feedexport/success_count/<Storage>` and `feedexport/failed_count/<Storage>`.
+
+Custom formats and destinations can be registered through `FEED_EXPORTERS` and `FEED_STORAGES`.
+The exporter runs as a Python extension because it serializes user-defined item types, while both
+crawl engines retain their existing runtime ownership.
 
 ## Selectors
 
@@ -420,6 +465,7 @@ The validation suite compares:
 * request depth limits, priority adjustments, verbose stats, arbitrary integers, and engine parity
 * explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
 * extension priorities, overrides, factories, opt-outs, async hooks, lifecycle order, and parity
+* feed formats, fields, encodings, templates, batches, filters, storage, signals, and engine parity
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -430,6 +476,7 @@ Run it with:
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
 python benchmark/verify_extensions.py
+python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
@@ -558,6 +605,7 @@ python benchmark/verify_integration.py
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
 python benchmark/verify_extensions.py
+python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
 python benchmark/verify_selectors.py
@@ -581,8 +629,9 @@ The current foundation includes Python and Rust crawl coordination, HTTP models,
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
 filtering, scheduling, selectors, and Rust-owned retry, request depth, robots, download slot, and
 downloader statistics policies. The native downloader also owns authenticated per-proxy connection
-pools. SpiderOxide does not yet include persistent job state, feed exports, built-in operational
-extensions, SOCKS proxy support, or Scrapy command-line compatibility.
+pools. Local and standard-output feed exports are available through the built-in feed extension.
+SpiderOxide does not yet include persistent job state, remote feed storage, feed postprocessing,
+built-in operational extensions, SOCKS proxy support, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.
