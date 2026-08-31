@@ -53,7 +53,7 @@ def _verify_method_and_metadata() -> None:
     assert redirected.headers["Authorization"] == b"Bearer token"
     assert redirected.headers["Cookie"] == b"explicit=yes"
     assert "Referer" not in redirected.headers
-    assert redirected.cookies == {"request": "yes"}
+    assert redirected.cookies == {}
     assert redirected.priority == 13
     assert redirected.meta["redirect_times"] == 1
     assert redirected.meta["redirect_ttl"] == 19

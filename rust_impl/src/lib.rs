@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashSet};
 
+mod cookies;
 mod depth;
 mod downloader;
 mod engine;
@@ -11,6 +12,7 @@ mod policy;
 mod robots;
 mod slots;
 
+use cookies::NativeCookieJar;
 use depth::{NativeDepthDecision, NativeDepthPolicy};
 use downloader::{NativeHttpClient, NativeHttpResponse};
 use engine::NativeCrawlCoordinator;
@@ -331,6 +333,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<NativeHttpClient>()?;
     module.add_class::<NativeHttpResponse>()?;
     module.add_class::<NativeHttpCacheStore>()?;
+    module.add_class::<NativeCookieJar>()?;
     module.add_class::<NativeDepthPolicy>()?;
     module.add_class::<NativeDepthDecision>()?;
     module.add_class::<NativeCrawlCoordinator>()?;
