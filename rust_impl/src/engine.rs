@@ -12,9 +12,35 @@ use tokio::sync::Notify;
 use crate::fingerprint_bytes;
 use crate::job::PersistentJobStore;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum QueueOrder {
+    Fifo,
+    Lifo,
+}
+
+impl QueueOrder {
+    fn parse(value: &str, setting: &str) -> PyResult<Self> {
+        match value {
+            "fifo" => Ok(Self::Fifo),
+            "lifo" => Ok(Self::Lifo),
+            _ => Err(PyValueError::new_err(format!(
+                "{setting} must be 'fifo' or 'lifo'"
+            ))),
+        }
+    }
+
+    fn rank(self, sequence: u64) -> u64 {
+        match self {
+            Self::Fifo => u64::MAX - sequence,
+            Self::Lifo => sequence,
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct CoordinatorQueueEntry {
     priority: BigInt,
+    rank: u64,
     sequence: u64,
     request_id: u64,
 }
@@ -23,7 +49,7 @@ impl Ord for CoordinatorQueueEntry {
     fn cmp(&self, other: &Self) -> Ordering {
         self.priority
             .cmp(&other.priority)
-            .then_with(|| other.sequence.cmp(&self.sequence))
+            .then_with(|| self.rank.cmp(&other.rank))
     }
 }
 
@@ -33,10 +59,121 @@ impl PartialOrd for CoordinatorQueueEntry {
     }
 }
 
+struct StagedQueueEntry {
+    entry: CoordinatorQueueEntry,
+    is_start_request: bool,
+    persistent: bool,
+}
+
+struct PriorityQueues {
+    normal: BinaryHeap<CoordinatorQueueEntry>,
+    start: BinaryHeap<CoordinatorQueueEntry>,
+    normal_order: QueueOrder,
+    start_order: Option<QueueOrder>,
+}
+
+impl PriorityQueues {
+    fn new(normal_order: QueueOrder, start_order: Option<QueueOrder>) -> Self {
+        Self {
+            normal: BinaryHeap::new(),
+            start: BinaryHeap::new(),
+            normal_order,
+            start_order,
+        }
+    }
+
+    fn push(&mut self, priority: BigInt, sequence: u64, request_id: u64, is_start_request: bool) {
+        let (queue, order) = if is_start_request && let Some(start_order) = self.start_order {
+            (&mut self.start, start_order)
+        } else {
+            (&mut self.normal, self.normal_order)
+        };
+        queue.push(CoordinatorQueueEntry {
+            priority,
+            rank: order.rank(sequence),
+            sequence,
+            request_id,
+        });
+    }
+
+    fn pop(&mut self) -> Option<CoordinatorQueueEntry> {
+        match (self.normal.peek(), self.start.peek()) {
+            (Some(normal), Some(start)) if normal.priority >= start.priority => self.normal.pop(),
+            (Some(_), Some(_)) => self.start.pop(),
+            (Some(_), None) => self.normal.pop(),
+            (None, Some(_)) => self.start.pop(),
+            (None, None) => None,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.normal.len() + self.start.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.normal.is_empty() && self.start.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.normal.clear();
+        self.start.clear();
+    }
+}
+
+struct CoordinatorQueues {
+    memory: PriorityQueues,
+    disk: PriorityQueues,
+}
+
+impl CoordinatorQueues {
+    fn new(
+        memory_order: QueueOrder,
+        disk_order: QueueOrder,
+        start_memory_order: Option<QueueOrder>,
+        start_disk_order: Option<QueueOrder>,
+    ) -> Self {
+        Self {
+            memory: PriorityQueues::new(memory_order, start_memory_order),
+            disk: PriorityQueues::new(disk_order, start_disk_order),
+        }
+    }
+
+    fn push(&mut self, staged: StagedQueueEntry) {
+        let queue = if staged.persistent {
+            &mut self.disk
+        } else {
+            &mut self.memory
+        };
+        queue.push(
+            staged.entry.priority,
+            staged.entry.sequence,
+            staged.entry.request_id,
+            staged.is_start_request,
+        );
+    }
+
+    fn pop(&mut self) -> Option<CoordinatorQueueEntry> {
+        self.memory.pop().or_else(|| self.disk.pop())
+    }
+
+    fn len(&self) -> usize {
+        self.memory.len() + self.disk.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.memory.is_empty() && self.disk.is_empty()
+    }
+
+    fn clear(&mut self) {
+        self.memory.clear();
+        self.disk.clear();
+    }
+}
+
 struct CoordinatorState {
     fingerprints: HashSet<[u8; 32]>,
-    staged: HashMap<u64, CoordinatorQueueEntry>,
-    queue: BinaryHeap<CoordinatorQueueEntry>,
+    staged: HashMap<u64, StagedQueueEntry>,
+    queues: CoordinatorQueues,
     active: HashSet<u64>,
     next_request_id: u64,
     next_sequence: u64,
@@ -50,7 +187,13 @@ struct CoordinatorState {
 }
 
 impl CoordinatorState {
-    fn new(job_dir: Option<&str>) -> PyResult<Self> {
+    fn new(
+        job_dir: Option<&str>,
+        memory_order: QueueOrder,
+        disk_order: QueueOrder,
+        start_memory_order: Option<QueueOrder>,
+        start_disk_order: Option<QueueOrder>,
+    ) -> PyResult<Self> {
         let (job_store, recovered_requests, fingerprints) = if let Some(path) = job_dir {
             let store = PersistentJobStore::open(path)?;
             let requests = store.load_requests()?;
@@ -59,7 +202,12 @@ impl CoordinatorState {
         } else {
             (None, Vec::new(), HashSet::new())
         };
-        let mut queue = BinaryHeap::new();
+        let mut queues = CoordinatorQueues::new(
+            memory_order,
+            disk_order,
+            start_memory_order,
+            start_disk_order,
+        );
         let mut recovered = Vec::with_capacity(recovered_requests.len());
         let mut persistent_ids = HashSet::with_capacity(recovered_requests.len());
         let mut next_request_id = 0;
@@ -83,11 +231,12 @@ impl CoordinatorState {
                     .checked_add(1)
                     .ok_or_else(|| PyOverflowError::new_err("scheduler sequence exhausted"))?,
             );
-            queue.push(CoordinatorQueueEntry {
+            queues.disk.push(
                 priority,
-                sequence: request.sequence,
-                request_id: request.request_id,
-            });
+                request.sequence,
+                request.request_id,
+                request.is_start_request,
+            );
             persistent_ids.insert(request.request_id);
             recovered.push((request.request_id, request.payload));
         }
@@ -95,7 +244,7 @@ impl CoordinatorState {
         Ok(Self {
             fingerprints,
             staged: HashMap::new(),
-            queue,
+            queues,
             active: HashSet::new(),
             next_request_id,
             next_sequence,
@@ -129,16 +278,46 @@ impl NativeCrawlCoordinator {
 #[pymethods]
 impl NativeCrawlCoordinator {
     #[new]
-    #[pyo3(signature = (concurrency, pending_limit, job_dir = None))]
-    fn new(concurrency: usize, pending_limit: usize, job_dir: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (
+        concurrency,
+        pending_limit,
+        job_dir = None,
+        memory_queue = "fifo",
+        disk_queue = "fifo",
+        start_memory_queue = None,
+        start_disk_queue = None
+    ))]
+    fn new(
+        concurrency: usize,
+        pending_limit: usize,
+        job_dir: Option<&str>,
+        memory_queue: &str,
+        disk_queue: &str,
+        start_memory_queue: Option<&str>,
+        start_disk_queue: Option<&str>,
+    ) -> PyResult<Self> {
         if concurrency == 0 {
             return Err(PyValueError::new_err("concurrency must be at least 1"));
         }
         if pending_limit == 0 {
             return Err(PyValueError::new_err("pending limit must be at least 1"));
         }
+        let memory_order = QueueOrder::parse(memory_queue, "memory queue")?;
+        let disk_order = QueueOrder::parse(disk_queue, "disk queue")?;
+        let start_memory_order = start_memory_queue
+            .map(|value| QueueOrder::parse(value, "start memory queue"))
+            .transpose()?;
+        let start_disk_order = start_disk_queue
+            .map(|value| QueueOrder::parse(value, "start disk queue"))
+            .transpose()?;
         Ok(Self {
-            state: Arc::new(Mutex::new(CoordinatorState::new(job_dir)?)),
+            state: Arc::new(Mutex::new(CoordinatorState::new(
+                job_dir,
+                memory_order,
+                disk_order,
+                start_memory_order,
+                start_disk_order,
+            )?)),
             notify: Arc::new(Notify::new()),
             concurrency,
             pending_limit,
@@ -151,8 +330,10 @@ impl NativeCrawlCoordinator {
         body,
         priority = "0",
         filter_duplicates = true,
-        payload = None
+        payload = None,
+        is_start_request = false
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn schedule(
         &self,
         url: &str,
@@ -161,6 +342,7 @@ impl NativeCrawlCoordinator {
         priority: &str,
         filter_duplicates: bool,
         payload: Option<&[u8]>,
+        is_start_request: bool,
     ) -> PyResult<Option<u64>> {
         let fingerprint = fingerprint_bytes(url, method, body)?;
         let priority = BigInt::from_str(priority)
@@ -201,6 +383,7 @@ impl NativeCrawlCoordinator {
                     &priority_text,
                     payload,
                     filter_duplicates.then_some(&fingerprint),
+                    is_start_request,
                 )?
             {
                 return Ok(None);
@@ -213,10 +396,15 @@ impl NativeCrawlCoordinator {
             }
             state.staged.insert(
                 request_id,
-                CoordinatorQueueEntry {
-                    priority,
-                    sequence,
-                    request_id,
+                StagedQueueEntry {
+                    entry: CoordinatorQueueEntry {
+                        priority,
+                        rank: 0,
+                        sequence,
+                        request_id,
+                    },
+                    is_start_request,
+                    persistent: persisted,
                 },
             );
         }
@@ -229,7 +417,7 @@ impl NativeCrawlCoordinator {
             let entry = state.staged.remove(&request_id).ok_or_else(|| {
                 PyValueError::new_err(format!("request {request_id} is not staged"))
             })?;
-            state.queue.push(entry);
+            state.queues.push(entry);
         }
         self.notify.notify_waiters();
         Ok(())
@@ -251,7 +439,7 @@ impl NativeCrawlCoordinator {
                         return Ok(None);
                     }
                     if current.active.len() < concurrency
-                        && let Some(entry) = current.queue.pop()
+                        && let Some(entry) = current.queues.pop()
                     {
                         current.active.insert(entry.request_id);
                         popped = Some(entry.request_id);
@@ -259,7 +447,7 @@ impl NativeCrawlCoordinator {
                     if popped.is_none()
                         && current.input_closed
                         && current.staged.is_empty()
-                        && current.queue.is_empty()
+                        && current.queues.is_empty()
                         && current.active.is_empty()
                     {
                         current.finished = true;
@@ -289,7 +477,7 @@ impl NativeCrawlCoordinator {
                     if current.aborted || current.finished {
                         return Ok(false);
                     }
-                    if current.queue.len() + current.staged.len() < pending_limit {
+                    if current.queues.len() + current.staged.len() < pending_limit {
                         return Ok(true);
                     }
                 }
@@ -343,7 +531,7 @@ impl NativeCrawlCoordinator {
             let mut state = self.lock_state()?;
             state.aborted = true;
             state.staged.clear();
-            state.queue.clear();
+            state.queues.clear();
         }
         self.notify.notify_waiters();
         Ok(())
@@ -381,7 +569,7 @@ impl NativeCrawlCoordinator {
             let mut state = self.lock_state()?;
             state.aborted = true;
             state.staged.clear();
-            state.queue.clear();
+            state.queues.clear();
             state.job_store.take()
         };
         self.notify.notify_waiters();
@@ -394,7 +582,7 @@ impl NativeCrawlCoordinator {
     #[getter]
     fn queued_count(&self) -> PyResult<usize> {
         let state = self.lock_state()?;
-        Ok(state.queue.len() + state.staged.len())
+        Ok(state.queues.len() + state.staged.len())
     }
 
     #[getter]

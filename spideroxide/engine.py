@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from . import signals
-from .api import Scheduler
+from ._scheduler import EngineScheduler, SchedulerQueueConfig
 from .backend import BackendUnavailableError
 from .downloader import Downloader
 from .exceptions import CloseSpider, DropItem, IgnoreRequest
@@ -50,7 +50,7 @@ class CrawlEngine:
         self.settings: Settings = crawler.settings  # type: ignore[attr-defined]
         self.signals = crawler.signals  # type: ignore[attr-defined]
         self.stats: StatsCollector = crawler.stats  # type: ignore[attr-defined]
-        self.scheduler = Scheduler()
+        self.scheduler = EngineScheduler(SchedulerQueueConfig.from_settings(self.settings))
         self.downloader_middleware = DownloaderMiddlewareManager(
             crawler,
             self.settings.get("DOWNLOADER_MIDDLEWARES", {}),
@@ -170,6 +170,7 @@ class CrawlEngine:
             async for request in self.spider.start():
                 if not isinstance(request, Request):
                     raise TypeError("Spider.start() must yield Request objects")
+                request.meta.setdefault("is_start_request", True)
                 await queue.put(request)
         except BaseException as exception:
             await queue.put(_StartFailure(exception))
@@ -344,7 +345,16 @@ class NativeCrawlEngine(CrawlEngine):
             if configured_job_dir
             else None
         )
-        coordinator = NativeCrawlCoordinator(concurrency, pending_limit, job_dir)
+        queue_config = SchedulerQueueConfig.from_settings(settings)
+        coordinator = NativeCrawlCoordinator(
+            concurrency,
+            pending_limit,
+            job_dir,
+            queue_config.memory,
+            queue_config.disk,
+            queue_config.start_memory,
+            queue_config.start_disk,
+        )
         crawler.native_policy_runtime = policy_runtime
         crawler.native_depth_policy = depth_policy
         crawler.native_robots_runtime = robots_runtime
@@ -433,6 +443,7 @@ class NativeCrawlEngine(CrawlEngine):
             async for request in self.spider.start():
                 if not isinstance(request, Request):
                     raise TypeError("Spider.start() must yield Request objects")
+                request.meta.setdefault("is_start_request", True)
                 if not await self.scheduler.wait_for_pending_slot():
                     return
                 await self._schedule(request)
@@ -500,6 +511,7 @@ class NativeCrawlEngine(CrawlEngine):
             str(request.priority),
             not request.dont_filter,
             payload,
+            bool(request.meta.get("is_start_request", False)),
         )
         inserted = request_id is not None
         if inserted:

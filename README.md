@@ -138,12 +138,37 @@ result = asyncio.run(
 `ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
 requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
 
+## Scheduler queues
+
+Both crawl engines support Scrapy's built-in FIFO and LIFO queue settings. Normal requests use LIFO
+queues by default, while start requests use separate FIFO queues. Higher priorities are dequeued
+first. At equal priority, normal requests are dequeued before start requests.
+
+```python
+settings = {
+    "SCHEDULER_MEMORY_QUEUE": "scrapy.squeues.FifoMemoryQueue",
+    "SCHEDULER_DISK_QUEUE": "scrapy.squeues.PickleFifoDiskQueue",
+    "SCHEDULER_START_MEMORY_QUEUE": None,
+    "SCHEDULER_START_DISK_QUEUE": None,
+}
+```
+
+Setting both start queue values to `None` places start requests in the normal queues. The disk
+settings apply to serializable requests stored through `JOBDIR`. Memory-only requests are dequeued
+before persisted requests, matching Scrapy. Marshal and Pickle FIFO and LIFO disk queue paths are
+accepted. Unsupported custom queue classes fail during engine construction instead of being
+silently approximated.
+
+The public `Scheduler` component retains FIFO ties by default so existing component benchmarks and
+standalone callers keep their established behavior. Crawl engines use the Scrapy-compatible settings
+above.
+
 ## Persistent jobs
 
 Set `JOBDIR` with the Rust engine to make a crawl resumable. The native coordinator stores queued
-and in-flight requests, duplicate fingerprints, priorities, sequence numbers, and spider state in a
-locked SQLite WAL. A restarted crawler restores the frontier before it begins producing new start
-requests.
+and in-flight requests, duplicate fingerprints, priorities, sequence numbers, start-request
+classification, and spider state in a locked SQLite WAL. A restarted crawler restores the frontier
+before it begins producing new start requests.
 
 ```python
 result = asyncio.run(
@@ -165,7 +190,7 @@ directory for a different spider or running two processes against it is unsuppor
 Serializable requests survive normal cancellation, process termination, and in-flight interruption.
 Callback and errback functions must be bound methods of the running spider so they can be restored
 by name. Request headers, bodies, cookies, metadata, callback keyword arguments, flags, duplicate
-decisions, arbitrary-size priorities, and FIFO order at equal priority are retained.
+decisions, arbitrary-size priorities, and configured queue order are retained.
 
 When a request cannot be serialized, it remains in memory for the current process and increments
 `scheduler/unserializable`, matching Scrapy's fallback behavior. Set `SCHEDULER_DEBUG=True` to log
@@ -490,6 +515,7 @@ The validation suite compares:
 * scheduler insertion decisions
 * complete scheduler output order
 * FIFO behavior at equal priorities
+* FIFO and LIFO crawl queues, start-request precedence, storage precedence, and recovery
 * original request object identity
 * asynchronous spider lifecycle and cleanup
 * middleware and item pipeline behavior
@@ -519,6 +545,7 @@ python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
+python benchmark/verify_scheduler_queues.py
 python benchmark/verify_job_state.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
@@ -649,6 +676,7 @@ python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
+python benchmark/verify_scheduler_queues.py
 python benchmark/verify_job_state.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
@@ -672,10 +700,11 @@ The current foundation includes Python and Rust crawl coordination, HTTP models,
 HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
 filtering, scheduling, selectors, and Rust-owned retry, request depth, robots, download slot, and
 downloader statistics policies. The native engine also owns persistent request and duplicate state,
-and the native downloader owns authenticated per-proxy connection pools. Local and standard-output
-feed exports are available through the built-in feed extension. SpiderOxide does not yet include
-remote feed storage, feed postprocessing, built-in operational extensions, SOCKS proxy support, or
-Scrapy command-line compatibility.
+configured FIFO and LIFO crawl queues, and start-request precedence. The native downloader owns
+authenticated per-proxy connection pools. Local and standard-output feed exports are available
+through the built-in feed extension. SpiderOxide does not yet include remote feed storage, feed
+postprocessing, built-in operational extensions, SOCKS proxy support, or Scrapy command-line
+compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.

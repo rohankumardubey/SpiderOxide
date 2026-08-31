@@ -39,6 +39,8 @@ python benchmark/verify_crawler.py
 python benchmark/verify_extensions.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
+python benchmark/verify_scheduler_queues.py
+python benchmark/verify_job_state.py
 python benchmark/verify_selectors.py
 python benchmark/verify_retry.py
 python benchmark/verify_native_policy.py
