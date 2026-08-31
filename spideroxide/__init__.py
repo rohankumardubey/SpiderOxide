@@ -51,6 +51,12 @@ from .http import (
     TextResponse,
     XmlResponse,
 )
+from .httpcache import (
+    DummyPolicy,
+    HttpCacheMiddleware,
+    NativeHttpCacheStorage,
+    RFC2616Policy,
+)
 from .linkextractors import Link, LinkExtractor, LxmlLinkExtractor
 from .proxy import HttpProxyMiddleware
 from .retry import RetryMiddleware, get_retry_request
@@ -74,6 +80,7 @@ __all__ = [
     "CsvItemExporter",
     "DownloadError",
     "Downloader",
+    "DummyPolicy",
     "DepthMiddleware",
     "DropItem",
     "DupeFilter",
@@ -88,6 +95,7 @@ __all__ = [
     "IgnoreRequest",
     "HttpxDownloader",
     "HttpProxyMiddleware",
+    "HttpCacheMiddleware",
     "ItemFilter",
     "JsonItemExporter",
     "JsonLinesItemExporter",
@@ -97,9 +105,11 @@ __all__ = [
     "LxmlLinkExtractor",
     "NotConfigured",
     "NativeCrawlEngine",
+    "NativeHttpCacheStorage",
     "PriorityRequest",
     "Request",
     "RequestData",
+    "RFC2616Policy",
     "Response",
     "RetryMiddleware",
     "Rule",

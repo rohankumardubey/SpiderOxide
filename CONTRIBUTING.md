@@ -39,6 +39,7 @@ python benchmark/verify_crawler.py
 python benchmark/verify_crawl_spider.py
 python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
+python benchmark/verify_http_cache.py
 python benchmark/verify_extensions.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py

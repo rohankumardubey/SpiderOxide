@@ -45,6 +45,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Scrapy-compatible request depth limits, priorities, and statistics
 * Downloader and spider middleware
 * Item pipelines, signals, settings, and crawl statistics
+* Persistent Scrapy-compatible HTTP caching with native SQLite storage
 * Streaming HTTP downloads with repeated header support
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
@@ -217,6 +218,34 @@ middleware. Successful errback output then passes through spider output middlewa
 middleware failures skip request errbacks and continue at the next eligible spider exception hook.
 Items yielded before a callback or middleware generator fails are retained and continue through the
 remaining middleware chain.
+
+## HTTP cache
+
+Enable persistent response caching with `HTTPCACHE_ENABLED`. The default `DummyPolicy` reuses every
+stored response except ignored schemes and status codes. `RFC2616Policy` honors HTTP freshness,
+validators, `Cache-Control`, `Date`, `Age`, `Expires`, and `Last-Modified`; stale entries are
+revalidated with conditional request headers and may recover eligible server or download failures.
+
+```python
+settings = {
+    "HTTPCACHE_ENABLED": True,
+    "HTTPCACHE_DIR": ".cache/http",
+    "HTTPCACHE_POLICY": "spideroxide.httpcache.RFC2616Policy",
+    "HTTPCACHE_EXPIRATION_SECS": 86400,
+}
+```
+
+`NativeHttpCacheStorage` keeps each spider's cache in a SQLite WAL database. Cache keys use the
+native request fingerprint, so the method, canonical URL, and request body participate in identity.
+Response URLs, status codes, bodies, and repeated headers survive process restarts. The standard
+response type is reconstructed from the cached metadata, and cache hits include `cached` in
+`Response.flags`.
+
+The supported compatibility settings are `HTTPCACHE_STORAGE`, `HTTPCACHE_IGNORE_HTTP_CODES`,
+`HTTPCACHE_IGNORE_MISSING`, `HTTPCACHE_IGNORE_SCHEMES`, `HTTPCACHE_ALWAYS_STORE`, and
+`HTTPCACHE_IGNORE_RESPONSE_CACHE_CONTROLS`. Set request metadata `dont_cache` to bypass lookup and
+storage. `HTTPCACHE_GZIP` and `HTTPCACHE_DBM_MODULE` are accepted for settings compatibility but do
+not change native SQLite storage.
 
 ## Scheduler queues
 
@@ -633,6 +662,7 @@ The validation suite compares:
 * middleware and item pipeline behavior
 * callback and errback handling
 * HTTP headers, request serialization, curl, forms, JSON, response subclasses, and following
+* persistent cache hits, expiration, revalidation, repeated headers, lifecycle, and engine parity
 * native HTTP methods, bodies, repeated headers, and cookies
 * native redirects, compression, streaming, timeouts, and response limits
 * native priority ordering, duplicate decisions, and request identity
@@ -657,6 +687,7 @@ python benchmark/verify_crawler.py
 python benchmark/verify_crawl_spider.py
 python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
+python benchmark/verify_http_cache.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
@@ -791,6 +822,7 @@ python benchmark/verify_crawler.py
 python benchmark/verify_crawl_spider.py
 python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
+python benchmark/verify_http_cache.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
@@ -819,8 +851,9 @@ The current foundation includes Python and Rust crawl coordination, Scrapy-compa
 response classes, Python and Rust HTTP downloaders, spiders, middleware, item pipelines, signals,
 settings, stats, duplicate filtering, scheduling, selectors, CrawlSpider rules, native link
 candidate extraction, and Rust-owned retry, request depth, robots, download slot, and downloader
-statistics policies. The native engine also owns persistent request and duplicate state, configured
-FIFO and LIFO crawl queues, and start-request precedence.
+statistics policies. Persistent native SQLite HTTP caching supports unconditional reuse and RFC
+revalidation. The native engine also owns persistent request and duplicate state, configured FIFO
+and LIFO crawl queues, and start-request precedence.
 The native downloader owns authenticated per-proxy connection pools. Local and standard-output feed
 exports are available through the built-in feed extension. SpiderOxide does not yet include remote
 feed storage, feed postprocessing, built-in operational extensions, SOCKS proxy support, or Scrapy
