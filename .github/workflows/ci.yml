@@ -65,6 +65,9 @@ jobs:
       - name: Verify crawler foundation
         run: .venv/bin/python benchmark/verify_crawler.py
 
+      - name: Verify CrawlSpider and link extraction
+        run: .venv/bin/python benchmark/verify_crawl_spider.py
+
       - name: Verify spider middleware
         run: .venv/bin/python benchmark/verify_spider_middleware.py
 

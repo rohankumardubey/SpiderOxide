@@ -30,3 +30,4 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["io-util", "macros", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["io"] }
 url = "2.5"
+scraper = { version = "0.24", default-features = false, features = ["errors"] }

@@ -5,6 +5,7 @@ mod depth;
 mod downloader;
 mod engine;
 mod job;
+mod links;
 mod policy;
 mod robots;
 mod slots;
@@ -12,6 +13,7 @@ mod slots;
 use depth::{NativeDepthDecision, NativeDepthPolicy};
 use downloader::{NativeHttpClient, NativeHttpResponse};
 use engine::NativeCrawlCoordinator;
+use links::extract_link_candidates;
 use policy::{NativePolicyRuntime, NativeRetryDecision};
 use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
@@ -319,6 +321,7 @@ impl RustScheduler {
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_batch, module)?)?;
+    module.add_function(wrap_pyfunction!(extract_link_candidates, module)?)?;
     module.add(
         "NativeDownloadError",
         module.py().get_type::<NativeDownloadError>(),

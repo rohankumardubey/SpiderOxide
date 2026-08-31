@@ -42,7 +42,7 @@ class Spider:
 
     def start_requests(self) -> Iterable[Request]:
         for url in self.start_urls:
-            yield Request(url, callback=self.parse, dont_filter=True)
+            yield Request(url, callback=self._parse, dont_filter=True)
 
     async def start(self) -> AsyncIterator[Request]:
         for request in self.start_requests():
@@ -50,6 +50,9 @@ class Spider:
 
     def parse(self, response: Response, **kwargs: Any) -> object:
         raise NotImplementedError(f"{type(self).__name__}.parse must be implemented")
+
+    def _parse(self, response: Response, **kwargs: Any) -> object:
+        return self.parse(response, **kwargs)
 
     async def closed(self, reason: str) -> None:
         return None
