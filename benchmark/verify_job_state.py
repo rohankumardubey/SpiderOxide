@@ -429,6 +429,40 @@ def _verify_schema_rejection(directory: Path) -> None:
         raise AssertionError("native store accepted an incompatible schema")
 
 
+def _verify_schema_migration(directory: Path) -> None:
+    directory.mkdir()
+    with sqlite3.connect(directory / "job.sqlite3") as connection:
+        connection.executescript(
+            """
+            CREATE TABLE metadata (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            );
+            CREATE TABLE requests (
+                request_id INTEGER PRIMARY KEY,
+                sequence INTEGER NOT NULL UNIQUE,
+                priority TEXT NOT NULL,
+                payload BLOB NOT NULL
+            );
+            INSERT INTO metadata(key, value) VALUES ('schema_version', 1);
+            INSERT INTO requests(request_id, sequence, priority, payload)
+            VALUES (7, 3, '11', X'6C6567616379');
+            """
+        )
+
+    coordinator = NativeCrawlCoordinator(1, 1, str(directory))
+    assert coordinator.take_recovered() == [(7, b"legacy")]
+    coordinator.close()
+
+    with sqlite3.connect(directory / "job.sqlite3") as connection:
+        version = connection.execute(
+            "SELECT value FROM metadata WHERE key = 'schema_version'"
+        ).fetchone()
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(requests)").fetchall()}
+    assert version == (2,)
+    assert "is_start" in columns
+
+
 async def _verify() -> None:
     with tempfile.TemporaryDirectory(prefix="spideroxide-native-store-") as temporary:
         await _verify_native_store(Path(temporary))
@@ -444,6 +478,8 @@ async def _verify() -> None:
         await _verify_python_rejection(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="spideroxide-schema-") as temporary:
         _verify_schema_rejection(Path(temporary))
+    with tempfile.TemporaryDirectory(prefix="spideroxide-schema-migration-") as temporary:
+        _verify_schema_migration(Path(temporary) / "job")
 
 
 if __name__ == "__main__":

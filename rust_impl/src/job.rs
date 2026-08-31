@@ -9,12 +9,13 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::{PyErr, PyResult};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 pub(crate) struct PersistedRequest {
     pub(crate) request_id: u64,
     pub(crate) sequence: u64,
     pub(crate) priority: String,
+    pub(crate) is_start_request: bool,
     pub(crate) payload: Vec<u8>,
 }
 
@@ -64,7 +65,7 @@ impl PersistentJobStore {
         }
 
         let database_path = directory.join("job.sqlite3");
-        let connection = Connection::open(&database_path)
+        let mut connection = Connection::open(&database_path)
             .map_err(|error| job_error("unable to open persistent job database", error))?;
         connection
             .busy_timeout(Duration::from_secs(5))
@@ -87,6 +88,7 @@ impl PersistentJobStore {
                     request_id INTEGER PRIMARY KEY,
                     sequence INTEGER NOT NULL UNIQUE,
                     priority TEXT NOT NULL,
+                    is_start INTEGER NOT NULL CHECK (is_start IN (0, 1)),
                     payload BLOB NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS job_state (
@@ -94,7 +96,7 @@ impl PersistentJobStore {
                     payload BLOB NOT NULL
                 );
                 INSERT OR IGNORE INTO metadata(key, value)
-                VALUES ('schema_version', 1);
+                VALUES ('schema_version', 2);
                 ",
             )
             .map_err(|error| job_error("unable to initialize persistent job database", error))?;
@@ -106,7 +108,24 @@ impl PersistentJobStore {
                 |row| row.get(0),
             )
             .map_err(|error| job_error("unable to read persistent job schema", error))?;
-        if version != SCHEMA_VERSION {
+        if version == 1 {
+            let transaction = connection
+                .transaction()
+                .map_err(|error| job_error("unable to start persistent job migration", error))?;
+            transaction
+                .execute_batch(
+                    "
+                    ALTER TABLE requests
+                    ADD COLUMN is_start INTEGER NOT NULL DEFAULT 0
+                    CHECK (is_start IN (0, 1));
+                    UPDATE metadata SET value = 2 WHERE key = 'schema_version';
+                    ",
+                )
+                .map_err(|error| job_error("unable to migrate persistent job schema", error))?;
+            transaction
+                .commit()
+                .map_err(|error| job_error("unable to commit persistent job migration", error))?;
+        } else if version != SCHEMA_VERSION {
             return Err(PyRuntimeError::new_err(format!(
                 "unsupported JOBDIR schema version {version}; expected {SCHEMA_VERSION}"
             )));
@@ -123,7 +142,7 @@ impl PersistentJobStore {
             .connection
             .prepare(
                 "
-                SELECT request_id, sequence, priority, payload
+                SELECT request_id, sequence, priority, is_start, payload
                 FROM requests
                 ORDER BY sequence ASC
                 ",
@@ -135,18 +154,20 @@ impl PersistentJobStore {
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, String>(2)?,
-                    row.get::<_, Vec<u8>>(3)?,
+                    row.get::<_, bool>(3)?,
+                    row.get::<_, Vec<u8>>(4)?,
                 ))
             })
             .map_err(|error| job_error("unable to read persisted requests", error))?;
 
         rows.map(|row| {
-            let (request_id, sequence, priority, payload) =
+            let (request_id, sequence, priority, is_start_request, payload) =
                 row.map_err(|error| job_error("unable to decode persisted request", error))?;
             Ok(PersistedRequest {
                 request_id: unsigned_integer(request_id, "request identifier")?,
                 sequence: unsigned_integer(sequence, "request sequence")?,
                 priority,
+                is_start_request,
                 payload,
             })
         })
@@ -193,6 +214,7 @@ impl PersistentJobStore {
         priority: &str,
         payload: Option<&[u8]>,
         fingerprint: Option<&[u8; 32]>,
+        is_start_request: bool,
     ) -> PyResult<bool> {
         let transaction = self
             .connection
@@ -207,13 +229,14 @@ impl PersistentJobStore {
             transaction
                 .execute(
                     "
-                    INSERT INTO requests(request_id, sequence, priority, payload)
-                    VALUES (?1, ?2, ?3, ?4)
+                    INSERT INTO requests(request_id, sequence, priority, is_start, payload)
+                    VALUES (?1, ?2, ?3, ?4, ?5)
                     ",
                     params![
                         sqlite_integer(request_id, "request identifier")?,
                         sqlite_integer(sequence, "request sequence")?,
                         priority,
+                        is_start_request,
                         payload,
                     ],
                 )

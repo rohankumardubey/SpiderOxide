@@ -162,8 +162,8 @@ async def _verify_engine_behavior() -> None:
     assert urls == [
         "https://example.test/root",
         "https://example.test/huge",
-        "https://example.test/high-one",
         "https://example.test/high-two",
+        "https://example.test/high-one",
         "https://example.test/repeat",
         "https://example.test/repeat",
         "https://example.test/low",
