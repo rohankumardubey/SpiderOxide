@@ -4,10 +4,15 @@ import pickle
 from collections.abc import Mapping
 
 from .headers import Headers
-from .http import Request
+from .http import FormRequest, JsonRequest, Request
 from .spider import Spider
 
-_REQUEST_PAYLOAD_VERSION = 1
+_REQUEST_PAYLOAD_VERSION = 2
+_REQUEST_TYPES: dict[str, type[Request]] = {
+    "Request": Request,
+    "FormRequest": FormRequest,
+    "JsonRequest": JsonRequest,
+}
 
 
 def _callback_name(spider: Spider, callback: object, field: str) -> str | None:
@@ -40,8 +45,12 @@ def _resolve_callback(spider: Spider, name: object, field: str) -> object:
 
 
 def serialize_request(request: Request, spider: Spider) -> bytes:
+    request_type = type(request)
     payload = {
         "version": _REQUEST_PAYLOAD_VERSION,
+        "request_type": (
+            request_type.__name__ if request_type in _REQUEST_TYPES.values() else "Request"
+        ),
         "url": request.url,
         "callback": _callback_name(spider, request.callback, "callback"),
         "method": request.method,
@@ -56,6 +65,8 @@ def serialize_request(request: Request, spider: Spider) -> bytes:
         "flags": request.flags,
         "cb_kwargs": request.cb_kwargs,
     }
+    if isinstance(request, JsonRequest):
+        payload["dumps_kwargs"] = request.dumps_kwargs
     try:
         return pickle.dumps(payload, protocol=4)
     except (AttributeError, pickle.PickleError, TypeError) as error:
@@ -69,7 +80,8 @@ def deserialize_request(payload: bytes, spider: Spider) -> Request:
         raise ValueError(f"persisted request payload cannot be decoded: {error}") from error
     if not isinstance(values, Mapping):
         raise ValueError("persisted request payload is not a mapping")
-    if values.get("version") != _REQUEST_PAYLOAD_VERSION:
+    version = values.get("version")
+    if version not in {1, _REQUEST_PAYLOAD_VERSION}:
         raise ValueError(f"unsupported persisted request version: {values.get('version')!r}")
 
     raw_headers = values.get("headers")
@@ -86,7 +98,15 @@ def deserialize_request(payload: bytes, spider: Spider) -> Request:
             raise ValueError("persisted request contains an invalid header")
         headers.appendlist(pair[0], pair[1])
 
-    return Request(
+    request_type_name = values.get("request_type", "Request")
+    request_type = _REQUEST_TYPES.get(request_type_name)
+    if request_type is None:
+        raise ValueError(f"unsupported persisted request type: {request_type_name!r}")
+    request_kwargs: dict[str, object] = {}
+    if request_type is JsonRequest:
+        request_kwargs["dumps_kwargs"] = values.get("dumps_kwargs")
+
+    return request_type(
         url=values["url"],
         callback=_resolve_callback(spider, values.get("callback"), "callback"),
         method=values["method"],
@@ -100,6 +120,7 @@ def deserialize_request(payload: bytes, spider: Spider) -> Request:
         errback=_resolve_callback(spider, values.get("errback"), "errback"),
         flags=values["flags"],
         cb_kwargs=values["cb_kwargs"],
+        **request_kwargs,
     )
 
 

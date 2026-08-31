@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import math
+import mimetypes
 from collections.abc import Iterable
 from http.cookiejar import CookieJar
 from typing import Protocol
+from urllib.parse import urlsplit
 
 import httpx
 
 from .backend import BackendUnavailableError
 from .exceptions import DownloadError
 from .headers import Headers
-from .http import Request, Response, TextResponse
+from .http import HtmlResponse, Request, Response, TextResponse, XmlResponse
 from .settings import Settings
 
 
@@ -19,11 +22,65 @@ class Downloader(Protocol):
     async def fetch(self, request: Request) -> Response: ...
 
 
-def _textual_response(headers: Headers) -> bool:
+def _response_type(
+    headers: Headers,
+    *,
+    url: str,
+    body: bytes,
+) -> type[Response]:
     content_type = headers.get("Content-Type", b"").decode("latin-1").lower()
-    return content_type.startswith("text/") or any(
-        marker in content_type for marker in ("json", "xml", "javascript")
-    )
+    media_type = content_type.partition(";")[0].strip()
+    if media_type in {"text/html", "application/xhtml+xml"}:
+        return HtmlResponse
+    if "xml" in media_type:
+        return XmlResponse
+    if media_type.startswith("text/") or "json" in media_type or "javascript" in media_type:
+        return TextResponse
+    if media_type:
+        return Response
+
+    guessed_type, compression = mimetypes.guess_type(urlsplit(url).path)
+    if compression is None:
+        if guessed_type in {"text/html", "application/xhtml+xml"}:
+            return HtmlResponse
+        if guessed_type in {"application/xml", "text/xml"} or (
+            guessed_type is not None and guessed_type.endswith("+xml")
+        ):
+            return XmlResponse
+        if guessed_type is not None and (
+            guessed_type.startswith("text/")
+            or guessed_type == "application/json"
+            or guessed_type.endswith("+json")
+        ):
+            return TextResponse
+
+    sample = body[:4096]
+    prefix = sample.lstrip()[:64].lower()
+    for bom, encoding in (
+        (codecs.BOM_UTF32_BE, "utf-32"),
+        (codecs.BOM_UTF32_LE, "utf-32"),
+        (codecs.BOM_UTF16_BE, "utf-16"),
+        (codecs.BOM_UTF16_LE, "utf-16"),
+        (codecs.BOM_UTF8, "utf-8-sig"),
+    ):
+        if sample.startswith(bom):
+            decoded = sample.decode(encoding, errors="replace").lstrip().lower()
+            if decoded.startswith("<?xml"):
+                return XmlResponse
+            if decoded.startswith(("<!doctype html", "<html")):
+                return HtmlResponse
+            return TextResponse
+    if prefix.startswith(b"<?xml"):
+        return XmlResponse
+    if prefix.startswith((b"<!doctype html", b"<html")):
+        return HtmlResponse
+    if b"\x00" in sample:
+        return Response
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError:
+        return Response
+    return TextResponse
 
 
 def _download_settings(settings: Settings) -> tuple[float, int, str]:
@@ -48,7 +105,7 @@ def _response(
     headers = Headers()
     for name, value in header_pairs:
         headers.appendlist(name, value)
-    response_type = TextResponse if _textual_response(headers) else Response
+    response_type = _response_type(headers, url=url, body=body)
     return response_type(
         url=url,
         status=status,
@@ -69,10 +126,10 @@ def _proxy_details(request: Request) -> tuple[str | None, bytes | None]:
     return proxy, authorization
 
 
-def _transport_headers(request: Request) -> list[tuple[str, str]]:
+def _transport_headers(request: Request) -> list[tuple[bytes, bytes]]:
     return [
-        (name, value)
-        for name, value in request.headers.to_http_pairs()
+        (name.encode("ascii"), value)
+        for name, value in request.headers.to_raw_pairs()
         if name.lower() != "proxy-authorization"
     ]
 

@@ -18,12 +18,15 @@ from spideroxide._native import NativeCrawlCoordinator
 from spideroxide import (
     CloseSpider,
     Crawler,
+    FormRequest,
     Headers,
+    JsonRequest,
     NativeCrawlEngine,
     Request,
     Response,
     Spider,
 )
+from spideroxide.job import deserialize_request, serialize_request
 
 
 class BlockingDownloader:
@@ -233,6 +236,34 @@ async def _verify_native_store(directory: Path) -> None:
     assert finished.recovered_count == 0
     assert finished.seen_count == 3
     finished.close()
+
+
+def _verify_request_subclass_roundtrip() -> None:
+    class CustomRequest(Request):
+        pass
+
+    spider = ResumableSpider()
+    requests = [
+        FormRequest(
+            "https://example.test/form",
+            formdata={"name": "value"},
+        ),
+        JsonRequest(
+            "https://example.test/json",
+            data={"name": "value"},
+            dumps_kwargs={"sort_keys": False},
+        ),
+        CustomRequest("https://example.test/custom"),
+    ]
+    restored = [
+        deserialize_request(serialize_request(request, spider), spider) for request in requests
+    ]
+    assert type(restored[0]) is FormRequest
+    assert restored[0].body == requests[0].body
+    assert type(restored[1]) is JsonRequest
+    assert restored[1].body == requests[1].body
+    assert restored[1].dumps_kwargs == {"sort_keys": False}
+    assert type(restored[2]) is Request
 
 
 async def _verify_crawl_resume(directory: Path) -> None:
@@ -464,6 +495,7 @@ def _verify_schema_migration(directory: Path) -> None:
 
 
 async def _verify() -> None:
+    _verify_request_subclass_roundtrip()
     with tempfile.TemporaryDirectory(prefix="spideroxide-native-store-") as temporary:
         await _verify_native_store(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="spideroxide-crawl-resume-") as temporary:

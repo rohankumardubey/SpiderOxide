@@ -311,6 +311,38 @@ Custom formats and destinations can be registered through `FEED_EXPORTERS` and `
 The exporter runs as a Python extension because it serializes user-defined item types, while both
 crawl engines retain their existing runtime ownership.
 
+## HTTP models
+
+SpiderOxide provides Scrapy-compatible `Request`, `FormRequest`, and `JsonRequest` classes. Requests
+support Unicode URL quoting, text or byte bodies, repeated headers, callbacks, errbacks, metadata,
+callback keyword arguments, flags, copying, replacement, dictionary serialization, and common curl
+commands.
+
+```python
+from spideroxide import FormRequest, JsonRequest, Request
+
+
+page = Request.from_curl("curl https://example.com/private -u user:secret -H 'X-Trace: crawl'")
+login = FormRequest(
+    "https://example.com/login",
+    formdata={"username": "reader", "password": "secret"},
+)
+api = JsonRequest(
+    "https://example.com/api/items",
+    data={"limit": 100, "active": True},
+)
+```
+
+`Response`, `TextResponse`, `HtmlResponse`, and `XmlResponse` provide copy and replacement helpers,
+request metadata, callback keyword arguments, URL joining, `follow()`, and `follow_all()`.
+`TextResponse.follow_all()` accepts URL iterables, CSS expressions, XPath expressions, and selector
+lists. `FormRequest.from_response()` supports common HTML form controls and explicit submit-button
+selection.
+
+The downloader selects response subclasses from `Content-Type`, URL extensions, and conservative
+body inspection. Built-in request subclasses retain their type and configuration when restored from
+`JOBDIR`.
+
 ## Selectors
 
 `TextResponse` provides the familiar Scrapy selector API through Parsel, the same selector library
@@ -520,6 +552,7 @@ The validation suite compares:
 * asynchronous spider lifecycle and cleanup
 * middleware and item pipeline behavior
 * callback and errback handling
+* HTTP headers, request serialization, curl, forms, JSON, response subclasses, and following
 * native HTTP methods, bodies, repeated headers, and cookies
 * native redirects, compression, streaming, timeouts, and response limits
 * native priority ordering, duplicate decisions, and request identity
@@ -541,6 +574,7 @@ Run it with:
 ```bash
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_http_models.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
@@ -672,6 +706,7 @@ maturin develop -r
 python benchmark/verify_integration.py
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_http_models.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
 python benchmark/verify_native_downloader.py
@@ -696,15 +731,15 @@ SpiderOxide is experimental and does not yet provide full Scrapy compatibility. 
 native scheduling state through `JOBDIR`, while crawl results and statistics remain in memory. The
 URL canonicalizer intentionally implements a smaller contract than Scrapy.
 
-The current foundation includes Python and Rust crawl coordination, HTTP models, Python and Rust
-HTTP downloaders, spiders, middleware, item pipelines, signals, settings, stats, duplicate
-filtering, scheduling, selectors, and Rust-owned retry, request depth, robots, download slot, and
-downloader statistics policies. The native engine also owns persistent request and duplicate state,
-configured FIFO and LIFO crawl queues, and start-request precedence. The native downloader owns
-authenticated per-proxy connection pools. Local and standard-output feed exports are available
-through the built-in feed extension. SpiderOxide does not yet include remote feed storage, feed
-postprocessing, built-in operational extensions, SOCKS proxy support, or Scrapy command-line
-compatibility.
+The current foundation includes Python and Rust crawl coordination, Scrapy-compatible request and
+response classes, Python and Rust HTTP downloaders, spiders, middleware, item pipelines, signals,
+settings, stats, duplicate filtering, scheduling, selectors, and Rust-owned retry, request depth,
+robots, download slot, and downloader statistics policies. The native engine also owns persistent
+request and duplicate state, configured FIFO and LIFO crawl queues, and start-request precedence.
+The native downloader owns authenticated per-proxy connection pools. Local and standard-output feed
+exports are available through the built-in feed extension. SpiderOxide does not yet include remote
+feed storage, feed postprocessing, built-in operational extensions, SOCKS proxy support, or Scrapy
+command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.
