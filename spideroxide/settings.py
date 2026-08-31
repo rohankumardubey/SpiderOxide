@@ -35,6 +35,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
         "spideroxide.redirect.RedirectMiddleware": 600,
         "spideroxide.proxy.HttpProxyMiddleware": 750,
         "spideroxide.downloadermiddlewares.DownloaderStatsMiddleware": 850,
+        "spideroxide.httpcache.HttpCacheMiddleware": 900,
     },
     "DOWNLOADER_MIDDLEWARES": {},
     "DOWNLOADER_STATS": True,
@@ -92,6 +93,18 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "AUTOTHROTTLE_MAX_DELAY": 60.0,
     "AUTOTHROTTLE_TARGET_CONCURRENCY": 1.0,
     "AUTOTHROTTLE_DEBUG": False,
+    "HTTPCACHE_ENABLED": False,
+    "HTTPCACHE_POLICY": "spideroxide.httpcache.DummyPolicy",
+    "HTTPCACHE_STORAGE": "spideroxide.httpcache.NativeHttpCacheStorage",
+    "HTTPCACHE_DIR": "httpcache",
+    "HTTPCACHE_EXPIRATION_SECS": 0,
+    "HTTPCACHE_IGNORE_HTTP_CODES": [],
+    "HTTPCACHE_IGNORE_MISSING": False,
+    "HTTPCACHE_IGNORE_SCHEMES": ["file"],
+    "HTTPCACHE_IGNORE_RESPONSE_CACHE_CONTROLS": [],
+    "HTTPCACHE_ALWAYS_STORE": False,
+    "HTTPCACHE_GZIP": False,
+    "HTTPCACHE_DBM_MODULE": "dbm",
 }
 
 

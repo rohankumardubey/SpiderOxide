@@ -84,8 +84,8 @@ class CrawlEngine:
         try:
             self.stats.set_value("start_time", asyncio.get_running_loop().time())
             await self.signals.send(signals.engine_started)
-            await self.signals.send(signals.spider_opened, spider=self.spider)
             spider_opened = True
+            await self.signals.send(signals.spider_opened, spider=self.spider)
 
             start_queue: asyncio.Queue[object] = asyncio.Queue(maxsize=self.concurrent_requests * 2)
             start_producer = asyncio.create_task(self._produce_start_requests(start_queue))
@@ -531,8 +531,8 @@ class NativeCrawlEngine(CrawlEngine):
         try:
             self.stats.set_value("start_time", asyncio.get_running_loop().time())
             await self.signals.send(signals.engine_started)
-            await self.signals.send(signals.spider_opened, spider=self.spider)
             spider_opened = True
+            await self.signals.send(signals.spider_opened, spider=self.spider)
             self.native_download_slots = self._native_download_slots_type(
                 self.settings,
                 self.spider,

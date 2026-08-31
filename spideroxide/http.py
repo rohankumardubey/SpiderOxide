@@ -908,7 +908,11 @@ class JsonRequest(Request):
         dumps_kwargs: dict[str, Any] | None = None,
         **kwargs: object,
     ) -> None:
-        self._dumps_kwargs = copy.deepcopy(dumps_kwargs) if dumps_kwargs is not None else {}
+        object.__setattr__(
+            self,
+            "_dumps_kwargs",
+            copy.deepcopy(dumps_kwargs) if dumps_kwargs is not None else {},
+        )
         self._dumps_kwargs.setdefault("sort_keys", True)
         body_passed = kwargs.get("body") is not None
         data = kwargs.pop("data", None)
