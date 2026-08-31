@@ -138,6 +138,47 @@ result = asyncio.run(
 `ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
 requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
 
+## Spider middleware
+
+Configure spider middleware with `SPIDER_MIDDLEWARES`. Lower priority components receive responses
+first through `process_spider_input`. Output and exception hooks run in reverse order. Both crawl
+engines support synchronous and asynchronous hooks, including the asynchronous
+`process_spider_output_async` hook and streaming `process_start` hook.
+
+```python
+class AuditMiddleware:
+    async def process_start(self, start):
+        async for output in start:
+            yield output
+
+    def process_spider_input(self, response, spider):
+        spider.logger.info("Parsing %s", response.url)
+
+    def process_spider_output(self, response, result, spider):
+        yield from result
+
+    def process_spider_exception(self, response, exception, spider):
+        return None
+
+
+settings = {
+    "SPIDER_MIDDLEWARES": {
+        AuditMiddleware: 500,
+    },
+}
+```
+
+The legacy `process_start_requests` hook remains supported for spiders that use the default
+synchronous `start_requests()` source while the middleware chain remains synchronous. Middleware
+consuming a custom asynchronous `Spider.start()` or following a modern `process_start`
+transformation must implement `process_start` instead.
+
+Request errbacks receive failures from spider input and callbacks before spider exception
+middleware. Successful errback output then passes through spider output middleware. Output
+middleware failures skip request errbacks and continue at the next eligible spider exception hook.
+Items yielded before a callback or middleware generator fails are retained and continue through the
+remaining middleware chain.
+
 ## Scheduler queues
 
 Both crawl engines support Scrapy's built-in FIFO and LIFO queue settings. Normal requests use LIFO
@@ -574,6 +615,7 @@ Run it with:
 ```bash
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
@@ -706,6 +748,7 @@ maturin develop -r
 python benchmark/verify_integration.py
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py

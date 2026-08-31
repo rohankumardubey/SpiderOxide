@@ -21,11 +21,13 @@ from .middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
     SpiderMiddlewareManager,
+    _InvalidMiddlewareOutput,
+    _UnhandledSpiderMiddlewareError,
 )
 from .settings import Settings
 from .spider import Spider
 from .stats import StatsCollector
-from .utils import collect_outputs, maybe_await
+from .utils import collect_outputs_with_error, maybe_await
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +40,9 @@ class CrawlResult:
 @dataclass(frozen=True, slots=True)
 class _StartFailure:
     exception: BaseException
+
+
+_START_DONE = object()
 
 
 class CrawlEngine:
@@ -73,7 +78,7 @@ class CrawlEngine:
     async def crawl(self) -> CrawlResult:
         tasks: set[asyncio.Task[list[object]]] = set()
         start_producer: asyncio.Task[None] | None = None
-        next_start: asyncio.Task[Request | _StartFailure | None] | None = None
+        next_start: asyncio.Task[object] | None = None
         spider_opened = False
         reason = "finished"
         try:
@@ -82,9 +87,7 @@ class CrawlEngine:
             await self.signals.send(signals.spider_opened, spider=self.spider)
             spider_opened = True
 
-            start_queue: asyncio.Queue[Request | _StartFailure | None] = asyncio.Queue(
-                maxsize=self.concurrent_requests * 2
-            )
+            start_queue: asyncio.Queue[object] = asyncio.Queue(maxsize=self.concurrent_requests * 2)
             start_producer = asyncio.create_task(self._produce_start_requests(start_queue))
             next_start = asyncio.create_task(start_queue.get())
 
@@ -108,10 +111,13 @@ class CrawlEngine:
                     start_output = next_start.result()
                     if isinstance(start_output, _StartFailure):
                         raise start_output.exception
-                    if start_output is None:
+                    if start_output is _START_DONE:
                         next_start = None
-                    else:
+                    elif isinstance(start_output, Request):
                         await self._schedule(start_output)
+                    else:
+                        await self._process_outputs([start_output])
+                    if start_output is not _START_DONE:
                         next_start = asyncio.create_task(start_queue.get())
 
                 completed_requests = tasks.intersection(done)
@@ -164,18 +170,28 @@ class CrawlEngine:
 
     async def _produce_start_requests(
         self,
-        queue: asyncio.Queue[Request | _StartFailure | None],
+        queue: asyncio.Queue[object],
     ) -> None:
         try:
-            async for request in self.spider.start():
-                if not isinstance(request, Request):
-                    raise TypeError("Spider.start() must yield Request objects")
-                request.meta.setdefault("is_start_request", True)
-                await queue.put(request)
+            start = self.spider_middleware.process_start(
+                self._spider_start_source(),
+                self.spider,
+            )
+            async for output in start:
+                if output is None:
+                    continue
+                if isinstance(output, Request):
+                    output.meta.setdefault("is_start_request", True)
+                await queue.put(output)
         except BaseException as exception:
             await queue.put(_StartFailure(exception))
         else:
-            await queue.put(None)
+            await queue.put(_START_DONE)
+
+    def _spider_start_source(self) -> object:
+        if type(self.spider).start is Spider.start:
+            return self.spider.start_requests()
+        return self.spider.start()
 
     async def _safe_teardown(
         self,
@@ -235,26 +251,105 @@ class CrawlEngine:
         return await self.downloader_middleware.download(request, self.downloader.fetch)
 
     async def _run_callback(self, request: Request, response: Response) -> list[object]:
+        callback_exception: Exception | None = None
         try:
             await self.spider_middleware.process_input(response, self.spider)
             callback = request.callback or self.spider.parse
-            outputs = await collect_outputs(callback(response, **request.cb_kwargs))
+            callback_output = callback(response, **request.cb_kwargs)
+            processed, callback_exception = await self._process_spider_stream(
+                request,
+                response,
+                callback_output,
+            )
+        except CloseSpider:
+            raise
+        except _InvalidMiddlewareOutput:
+            raise
+        except Exception as exception:
+            processed = []
+            callback_exception = exception
+
+        if callback_exception is not None:
+            if request.errback is not None:
+                try:
+                    errback_output = request.errback(callback_exception)
+                    recovered, errback_exception = await self._process_spider_stream(
+                        request,
+                        response,
+                        errback_output,
+                    )
+                except CloseSpider:
+                    raise
+                except _InvalidMiddlewareOutput:
+                    raise
+                except Exception as errback_exception:
+                    callback_exception = errback_exception
+                else:
+                    processed.extend(recovered)
+                    if errback_exception is None:
+                        return processed
+                    callback_exception = errback_exception
+            try:
+                recovered = await self.spider_middleware.process_exception(
+                    response,
+                    callback_exception,
+                    self.spider,
+                )
+            except _UnhandledSpiderMiddlewareError as unhandled:
+                await self._report_spider_error(
+                    request,
+                    unhandled.exception,
+                    response=response,
+                )
+                return [*processed, *unhandled.partial]
+            if recovered is not None:
+                return [*processed, *recovered]
+            await self._report_spider_error(
+                request,
+                callback_exception,
+                response=response,
+            )
+        return processed
+
+    async def _process_spider_stream(
+        self,
+        request: Request,
+        response: Response,
+        outputs: object,
+    ) -> tuple[list[object], Exception | None]:
+        try:
+            return await self.spider_middleware.process_output_with_error(
+                response,
+                outputs,
+                self.spider,
+            )
+        except _UnhandledSpiderMiddlewareError as unhandled:
+            await self._report_spider_error(
+                request,
+                unhandled.exception,
+                response=response,
+            )
+            return unhandled.partial, None
+
+    async def _process_spider_output(
+        self,
+        request: Request,
+        response: Response,
+        outputs: list[object],
+    ) -> list[object]:
+        try:
             return await self.spider_middleware.process_output(
                 response,
                 outputs,
                 self.spider,
             )
-        except CloseSpider:
-            raise
-        except Exception as exception:
-            recovered = await self.spider_middleware.process_exception(
-                response,
-                exception,
-                self.spider,
+        except _UnhandledSpiderMiddlewareError as unhandled:
+            await self._report_spider_error(
+                request,
+                unhandled.exception,
+                response=response,
             )
-            if recovered is not None:
-                return recovered
-            return await self._run_errback(request, exception, response=response)
+            return unhandled.partial
 
     async def _run_errback(
         self,
@@ -265,11 +360,42 @@ class CrawlEngine:
     ) -> list[object]:
         if request.errback is not None:
             try:
-                return await collect_outputs(request.errback(exception))
+                errback_output = request.errback(exception)
             except CloseSpider:
                 raise
             except Exception as errback_exception:
                 exception = errback_exception
+                return await self._report_spider_error(
+                    request,
+                    exception,
+                    response=response,
+                )
+            outputs, errback_exception = await collect_outputs_with_error(errback_output)
+            if isinstance(errback_exception, CloseSpider):
+                raise errback_exception
+            if errback_exception is not None:
+                exception = errback_exception
+            else:
+                return outputs
+            await self._report_spider_error(
+                request,
+                exception,
+                response=response,
+            )
+            return outputs
+        return await self._report_spider_error(
+            request,
+            exception,
+            response=response,
+        )
+
+    async def _report_spider_error(
+        self,
+        request: Request,
+        exception: Exception,
+        *,
+        response: Response | None = None,
+    ) -> list[object]:
         self.stats.inc_value("spider_exceptions/count")
         kwargs: dict[str, object] = {
             "failure": exception,
@@ -440,13 +566,20 @@ class NativeCrawlEngine(CrawlEngine):
 
     async def _produce_native_start_requests(self) -> None:
         try:
-            async for request in self.spider.start():
-                if not isinstance(request, Request):
-                    raise TypeError("Spider.start() must yield Request objects")
-                request.meta.setdefault("is_start_request", True)
-                if not await self.scheduler.wait_for_pending_slot():
-                    return
-                await self._schedule(request)
+            start = self.spider_middleware.process_start(
+                self._spider_start_source(),
+                self.spider,
+            )
+            async for output in start:
+                if output is None:
+                    continue
+                if isinstance(output, Request):
+                    output.meta.setdefault("is_start_request", True)
+                    if not await self.scheduler.wait_for_pending_slot():
+                        return
+                    await self._schedule(output)
+                else:
+                    await self._process_outputs([output])
         finally:
             self.scheduler.close_input()
 
