@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import AsyncIterable, AsyncIterator, Iterable
 from typing import TYPE_CHECKING
 
 from .http import Request, Response
@@ -62,6 +62,21 @@ class DepthMiddleware:
     ) -> Iterable[object]:
         self._init_depth(response)
         for output in result:
+            if not isinstance(output, Request):
+                yield output
+                continue
+            processed = self.get_processed_request(output, response)
+            if processed is not None:
+                yield processed
+
+    async def process_spider_output_async(
+        self,
+        response: Response,
+        result: AsyncIterable[object],
+        spider: Spider | None = None,
+    ) -> AsyncIterator[object]:
+        self._init_depth(response)
+        async for output in result:
             if not isinstance(output, Request):
                 yield output
                 continue
