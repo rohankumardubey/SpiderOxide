@@ -5,13 +5,13 @@ import codecs
 import math
 import mimetypes
 from collections.abc import Iterable
-from http.cookiejar import CookieJar
 from typing import Protocol
 from urllib.parse import urlsplit
 
 import httpx
 
 from .backend import BackendUnavailableError
+from .cookies import _request_cookie_header
 from .exceptions import DownloadError
 from .headers import Headers
 from .http import HtmlResponse, Request, Response, TextResponse, XmlResponse
@@ -20,6 +20,11 @@ from .settings import Settings
 
 class Downloader(Protocol):
     async def fetch(self, request: Request) -> Response: ...
+
+
+class _StatelessCookies(httpx.Cookies):
+    def extract_cookies(self, response: httpx.Response) -> None:
+        return None
 
 
 def _response_type(
@@ -126,12 +131,26 @@ def _proxy_details(request: Request) -> tuple[str | None, bytes | None]:
     return proxy, authorization
 
 
-def _transport_headers(request: Request) -> list[tuple[bytes, bytes]]:
-    return [
+def _transport_headers(
+    request: Request,
+    *,
+    cookies_enabled: bool,
+) -> list[tuple[bytes, bytes]]:
+    pairs = [
         (name.encode("ascii"), value)
         for name, value in request.headers.to_raw_pairs()
         if name.lower() != "proxy-authorization"
     ]
+    if (
+        cookies_enabled
+        and not request.meta.get("dont_merge_cookies", False)
+        and not request.meta.get("_cookies_processed", False)
+        and "Cookie" not in request.headers
+    ):
+        cookie_header = _request_cookie_header(request)
+        if cookie_header is not None:
+            pairs.append((b"Cookie", cookie_header))
+    return pairs
 
 
 class HttpxDownloader:
@@ -146,7 +165,7 @@ class HttpxDownloader:
         self._timeout = timeout
         self._user_agent = user_agent
         self._transport = transport
-        self._cookie_jar = CookieJar()
+        self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
         self.client = self._create_client()
         self._proxy_clients: dict[tuple[str, bytes | None], httpx.AsyncClient] = {}
 
@@ -165,15 +184,17 @@ class HttpxDownloader:
                 ),
             )
         )
-        return httpx.AsyncClient(
+        client = httpx.AsyncClient(
             timeout=self._timeout,
             follow_redirects=False,
             headers={"User-Agent": self._user_agent} if self._user_agent else None,
-            cookies=self._cookie_jar,
             transport=self._transport,
             proxy=proxy_config,
             trust_env=False,
         )
+        # HTTPX always creates a client jar; persistence belongs to CookiesMiddleware.
+        client._cookies = _StatelessCookies()
+        return client
 
     async def fetch(self, request: Request) -> Response:
         proxy, authorization = _proxy_details(request)
@@ -194,9 +215,11 @@ class HttpxDownloader:
             async with client.stream(
                 request.method,
                 request.url,
-                headers=_transport_headers(request),
+                headers=_transport_headers(
+                    request,
+                    cookies_enabled=self._cookies_enabled,
+                ),
                 content=request.body or None,
-                cookies=request.cookies,
             ) as raw_response:
                 request.meta["download_latency"] = asyncio.get_running_loop().time() - started
                 declared_size = int(raw_response.headers.get("Content-Length", 0))
@@ -229,23 +252,18 @@ class HttpxDownloader:
         await asyncio.gather(*(client.aclose() for client in clients))
 
 
-def _request_headers(request: Request) -> list[tuple[str, bytes]]:
+def _request_headers(request: Request, *, cookies_enabled: bool) -> list[tuple[str, bytes]]:
     pairs = request.headers.to_raw_pairs()
-    if not request.cookies:
+    if (
+        not cookies_enabled
+        or request.meta.get("dont_merge_cookies", False)
+        or request.meta.get("_cookies_processed", False)
+        or "Cookie" in request.headers
+    ):
         return pairs
 
-    try:
-        cookie_value = "; ".join(
-            f"{name}={value}" for name, value in request.cookies.items()
-        ).encode("latin-1")
-    except UnicodeEncodeError as error:
-        raise DownloadError("cookie names and values must use Latin-1 characters") from error
-
-    for index, (name, value) in enumerate(pairs):
-        if name.lower() == "cookie":
-            pairs[index] = (name, value + b"; " + cookie_value)
-            break
-    else:
+    cookie_value = _request_cookie_header(request)
+    if cookie_value is not None:
         pairs.append(("Cookie", cookie_value))
     return pairs
 
@@ -263,6 +281,7 @@ class RustDownloader:
             ) from error
 
         self._download_error: type[Exception] = NativeDownloadError
+        self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
         self._client: object | None = NativeHttpClient(timeout, max_size, user_agent)
 
     async def fetch(self, request: Request) -> Response:
@@ -274,7 +293,7 @@ class RustDownloader:
             raw_response = await client.fetch(
                 request.url,
                 request.method,
-                _request_headers(request),
+                _request_headers(request, cookies_enabled=self._cookies_enabled),
                 request.body,
                 None if proxy is None else (proxy, authorization),
             )

@@ -33,6 +33,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
         "spideroxide.robots.RobotsTxtMiddleware": 100,
         "spideroxide.retry.RetryMiddleware": 550,
         "spideroxide.redirect.RedirectMiddleware": 600,
+        "spideroxide.cookies.CookiesMiddleware": 700,
         "spideroxide.proxy.HttpProxyMiddleware": 750,
         "spideroxide.downloadermiddlewares.DownloaderStatsMiddleware": 850,
         "spideroxide.httpcache.HttpCacheMiddleware": 900,
@@ -41,6 +42,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "DOWNLOADER_STATS": True,
     "HTTPPROXY_ENABLED": True,
     "HTTPPROXY_AUTH_ENCODING": "latin-1",
+    "COOKIES_ENABLED": True,
+    "COOKIES_DEBUG": False,
     "SPIDER_MIDDLEWARES_BASE": {
         "spideroxide.depth.DepthMiddleware": 900,
     },

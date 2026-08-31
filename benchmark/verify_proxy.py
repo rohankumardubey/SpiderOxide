@@ -7,12 +7,14 @@ import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from spideroxide import (
+    CookiesMiddleware,
     Crawler,
     Headers,
     HttpProxyMiddleware,
@@ -280,6 +282,8 @@ async def _verify_proxy_client_pools(
     middleware.proxies = {}
     for downloader_type in (HttpxDownloader, RustDownloader):
         downloader = downloader_type()
+        cookies_middleware = CookiesMiddleware()
+        spider = SimpleNamespace()
         for username, path in (
             ("first", "value"),
             ("first", "set-cookie"),
@@ -290,7 +294,9 @@ async def _verify_proxy_client_pools(
                 meta={"proxy": f"http://{username}:secret@{proxy_address}"},
             )
             middleware.process_request(request)
+            cookies_middleware.process_request(request, spider)
             response = await downloader.fetch(request)
+            cookies_middleware.process_response(request, response, spider)
             assert response.status == 200
             if path == "cookie":
                 assert isinstance(response, TextResponse)

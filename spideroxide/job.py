@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import pickle
 from collections.abc import Mapping
 
@@ -56,7 +57,7 @@ def serialize_request(request: Request, spider: Spider) -> bytes:
         "method": request.method,
         "headers": request.headers.to_raw_pairs(),
         "body": request.body,
-        "cookies": dict(request.cookies),
+        "cookies": copy.deepcopy(request.cookies),
         "meta": request.meta,
         "encoding": request.encoding,
         "priority": request.priority,

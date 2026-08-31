@@ -11,14 +11,16 @@ crate-type = ["cdylib"]
 
 [dependencies]
 async-compression = { version = "0.4", features = ["brotli", "gzip", "tokio", "zlib", "zstd"] }
+cookie = "0.18"
+cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
 futures-util = "0.3"
 fs2 = "0.4"
 num-bigint = "0.4"
+psl = "2"
 pyo3 = { version = "0.25", features = ["extension-module"] }
 pyo3-async-runtimes = { version = "0.25", features = ["tokio-runtime"] }
 rand = "0.9"
 reqwest = { version = "0.12", default-features = false, features = [
-    "cookies",
     "http2",
     "rustls-tls",
     "stream",

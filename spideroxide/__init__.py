@@ -15,6 +15,7 @@ from .backend import (
     BackendUnavailableError,
     resolve_backend,
 )
+from .cookies import CookiesMiddleware
 from .crawl import CrawlSpider, Rule
 from .crawler import Crawler, CrawlerRunner
 from .depth import DepthMiddleware
@@ -73,6 +74,7 @@ __all__ = [
     "BackendUnavailableError",
     "BaseItemExporter",
     "CloseSpider",
+    "CookiesMiddleware",
     "Crawler",
     "CrawlerRunner",
     "CrawlSpider",

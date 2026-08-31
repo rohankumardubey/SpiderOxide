@@ -194,12 +194,11 @@ async def _verify() -> None:
 
         await downloader.fetch(Request(f"{base_url}/set-cookie"))
         cookies = await downloader.fetch(Request(f"{base_url}/echo"))
-        assert "persisted=yes" in cookies.json()["cookie"]
+        assert cookies.json()["cookie"] == ""
         merged_cookies = await downloader.fetch(
             Request(f"{base_url}/echo", cookies={"request": "yes"})
         )
-        assert "persisted=yes" in merged_cookies.json()["cookie"]
-        assert "request=yes" in merged_cookies.json()["cookie"]
+        assert merged_cookies.json()["cookie"] == "request=yes"
         await downloader.close()
 
         limited = RustDownloader(Settings({"DOWNLOAD_MAXSIZE": 5}))
@@ -262,6 +261,6 @@ async def _verify() -> None:
 if __name__ == "__main__":
     asyncio.run(_verify())
     print(
-        "Native downloader passed: requests, redirects, compression, streaming, cookies, "
+        "Native downloader passed: requests, redirects, compression, streaming, explicit cookies, "
         "timeouts, limits, and crawler integration"
     )

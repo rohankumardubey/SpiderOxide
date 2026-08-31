@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::io;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use async_compression::tokio::bufread::{BrotliDecoder, GzipDecoder, ZlibDecoder, ZstdDecoder};
@@ -9,11 +9,8 @@ use futures_util::TryStreamExt;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
-use reqwest::Url;
-use reqwest::cookie::{CookieStore, Jar};
 use reqwest::header::{
-    ACCEPT_ENCODING, CONTENT_ENCODING, COOKIE, HeaderMap, HeaderName, HeaderValue,
-    PROXY_AUTHORIZATION,
+    ACCEPT_ENCODING, CONTENT_ENCODING, HeaderMap, HeaderName, HeaderValue, PROXY_AUTHORIZATION,
 };
 use reqwest::{Client, ClientBuilder, Method, Proxy, Response, Version, redirect};
 use tokio::io::{AsyncRead, AsyncReadExt, BufReader};
@@ -79,41 +76,13 @@ fn response_reader(response: Response, encodings: &[String]) -> ResponseReader {
     reader
 }
 
-fn merge_stored_cookies(headers: &mut HeaderMap, cookie_jar: &Jar, url: &str) -> PyResult<()> {
-    let explicit = headers
-        .get_all(COOKIE)
-        .iter()
-        .map(HeaderValue::as_bytes)
-        .collect::<Vec<_>>();
-    if explicit.is_empty() {
-        return Ok(());
-    }
-
-    let parsed_url = Url::parse(url)
-        .map_err(|error| download_error(format!("invalid request URL {url:?}: {error}")))?;
-    let Some(stored) = cookie_jar.cookies(&parsed_url) else {
-        return Ok(());
-    };
-    let mut combined = explicit.join(b"; ".as_slice());
-    if !combined.is_empty() && !stored.as_bytes().is_empty() {
-        combined.extend_from_slice(b"; ");
-    }
-    combined.extend_from_slice(stored.as_bytes());
-    let value = HeaderValue::from_bytes(&combined)
-        .map_err(|error| download_error(format!("invalid Cookie header: {error}")))?;
-    headers.remove(COOKIE);
-    headers.insert(COOKIE, value);
-    Ok(())
-}
-
-fn client_builder(cookie_jar: Arc<Jar>, user_agent: Option<&str>) -> ClientBuilder {
+fn client_builder(user_agent: Option<&str>) -> ClientBuilder {
     let mut default_headers = HeaderMap::new();
     default_headers.insert(
         ACCEPT_ENCODING,
         HeaderValue::from_static("gzip, br, deflate, zstd"),
     );
     let mut builder = Client::builder()
-        .cookie_provider(cookie_jar)
         .default_headers(default_headers)
         .redirect(redirect::Policy::none())
         .no_proxy();
@@ -124,11 +93,10 @@ fn client_builder(cookie_jar: Arc<Jar>, user_agent: Option<&str>) -> ClientBuild
 }
 
 fn build_client(
-    cookie_jar: Arc<Jar>,
     user_agent: Option<&str>,
     proxy: Option<(&str, Option<&[u8]>)>,
 ) -> PyResult<Client> {
-    let mut builder = client_builder(cookie_jar, user_agent);
+    let mut builder = client_builder(user_agent);
     if let Some((url, authorization)) = proxy {
         let mut configured = Proxy::all(url)
             .map_err(|error| download_error(format!("invalid proxy URL: {error}")))?;
@@ -201,7 +169,6 @@ impl NativeHttpResponse {
 pub(crate) struct NativeHttpClient {
     client: Client,
     proxy_clients: Mutex<HashMap<ProxyClientKey, Client>>,
-    cookie_jar: Arc<Jar>,
     user_agent: Option<String>,
     max_size: usize,
     timeout: Duration,
@@ -230,11 +197,7 @@ impl NativeHttpClient {
         if let Some(client) = clients.get(&key) {
             return Ok(client.clone());
         }
-        let client = build_client(
-            self.cookie_jar.clone(),
-            self.user_agent.as_deref(),
-            Some((proxy, authorization)),
-        )?;
+        let client = build_client(self.user_agent.as_deref(), Some((proxy, authorization)))?;
         clients.insert(key, client.clone());
         Ok(client)
     }
@@ -254,13 +217,11 @@ impl NativeHttpClient {
             ));
         }
 
-        let cookie_jar = Arc::new(Jar::default());
         let user_agent = user_agent.map(str::to_owned);
-        let client = build_client(cookie_jar.clone(), user_agent.as_deref(), None)?;
+        let client = build_client(user_agent.as_deref(), None)?;
         Ok(Self {
             client,
             proxy_clients: Mutex::new(HashMap::new()),
-            cookie_jar,
             user_agent,
             max_size,
             timeout,
@@ -283,7 +244,6 @@ impl NativeHttpClient {
                 .as_ref()
                 .and_then(|(_, authorization)| authorization.as_deref()),
         )?;
-        let cookie_jar = self.cookie_jar.clone();
         let max_size = self.max_size;
         let timeout = self.timeout;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
@@ -301,7 +261,6 @@ impl NativeHttpClient {
                 parsed_headers.append(parsed_name, parsed_value);
             }
             parsed_headers.remove(PROXY_AUTHORIZATION);
-            merge_stored_cookies(&mut parsed_headers, &cookie_jar, &url)?;
 
             let request = client
                 .request(parsed_method, &url)

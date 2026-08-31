@@ -25,6 +25,8 @@ Errback = Callable[[BaseException], object]
 HeaderInput = (
     Headers | Mapping[HeaderName, HeaderValues] | Iterable[tuple[HeaderName, HeaderValues]]
 )
+CookieValue = str | bytes | bool | float | int
+CookieInput = Mapping[str | bytes, CookieValue] | Iterable[Mapping[str, CookieValue]]
 FormData = Mapping[object, object] | Iterable[tuple[object, object]]
 
 _JSON_UNSET = object()
@@ -63,6 +65,21 @@ def _body_bytes(body: bytes | str | None, encoding: str, *, text: bool = False) 
     if not isinstance(body, bytes):
         raise TypeError(f"request body must be bytes or str, got {type(body).__name__}")
     return body
+
+
+def _copy_cookies(
+    cookies: CookieInput,
+) -> dict[str | bytes, CookieValue] | list[dict[str, CookieValue]]:
+    if isinstance(cookies, Mapping):
+        return dict(cookies)
+    if isinstance(cookies, (str, bytes)):
+        raise TypeError("cookies must be a mapping or an iterable of mappings")
+    copied = []
+    for cookie in cookies:
+        if not isinstance(cookie, Mapping):
+            raise TypeError("verbose cookies must be mappings")
+        copied.append(dict(cookie))
+    return copied
 
 
 def _callback_name(spider: object | None, callback: object, field: str) -> str | None:
@@ -304,7 +321,7 @@ class Request:
     method: str = "GET"
     headers: HeaderInput = field(default_factory=Headers)
     body: bytes | str | None = b""
-    cookies: Mapping[str, str] = field(default_factory=dict)
+    cookies: CookieInput = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
     encoding: str = "utf-8"
     priority: int = 0
@@ -324,7 +341,7 @@ class Request:
             "headers",
             Headers(self.headers, encoding=encoding),
         )
-        object.__setattr__(self, "cookies", dict(self.cookies))
+        object.__setattr__(self, "cookies", _copy_cookies(self.cookies))
         object.__setattr__(self, "meta", dict(self.meta))
         object.__setattr__(self, "cb_kwargs", dict(self.cb_kwargs))
         object.__setattr__(self, "flags", tuple(self.flags))
@@ -385,7 +402,7 @@ class Request:
         method: str = "GET",
         headers: Headers | None = None,
         body: bytes = b"",
-        cookies: Mapping[str, str] | None = None,
+        cookies: CookieInput | None = None,
         meta: Mapping[str, Any] | None = None,
         encoding: str | None = None,
         priority: int | None = None,
@@ -400,7 +417,7 @@ class Request:
             method=method,
             headers=headers or Headers(),
             body=body,
-            cookies=cookies or {},
+            cookies={} if cookies is None else cookies,
             meta=dict(meta or {}),
             encoding=self.encoding if encoding is None else encoding,
             priority=self.priority if priority is None else priority,
@@ -492,7 +509,7 @@ class Response:
         method: str = "GET",
         headers: HeaderInput | None = None,
         body: bytes | str | None = None,
-        cookies: Mapping[str, str] | None = None,
+        cookies: CookieInput | None = None,
         meta: Mapping[str, Any] | None = None,
         encoding: str | None = "utf-8",
         priority: int = 0,
@@ -514,7 +531,7 @@ class Response:
             method=method,
             headers=headers or Headers(),
             body=body,
-            cookies=cookies or {},
+            cookies={} if cookies is None else cookies,
             meta=dict(meta or {}),
             encoding=encoding,
             priority=priority,

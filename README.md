@@ -45,6 +45,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Scrapy-compatible request depth limits, priorities, and statistics
 * Downloader and spider middleware
 * Item pipelines, signals, settings, and crawl statistics
+* Scrapy-compatible cookie middleware with isolated native cookie jars
 * Persistent Scrapy-compatible HTTP caching with native SQLite storage
 * Streaming HTTP downloads with repeated header support
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
@@ -218,6 +219,28 @@ middleware. Successful errback output then passes through spider output middlewa
 middleware failures skip request errbacks and continue at the next eligible spider exception hook.
 Items yielded before a callback or middleware generator fails are retained and continue through the
 remaining middleware chain.
+
+## Cookies
+
+Cookie handling is enabled by default through `CookiesMiddleware`. Native cookie jars apply
+Scrapy-compatible domain, path, secure, expiration, and public-suffix rules for both downloader
+backends. Downloader clients remain stateless, so cookies cannot leak around middleware jar
+selection or bypass rules.
+
+```python
+yield Request(
+    "https://example.com/account",
+    cookies={"session": "value"},
+    meta={"cookiejar": "account"},
+)
+```
+
+`Request.cookies` accepts a name and value mapping or Scrapy's verbose cookie list with `name`,
+`value`, `domain`, `path`, and `secure` fields. Use the same `cookiejar` metadata value on later
+requests to keep an isolated session. Metadata is not copied automatically when following links.
+Set `dont_merge_cookies` to bypass both stored and request cookies while preserving a manually
+provided `Cookie` header. Set `COOKIES_ENABLED` to `False` to disable middleware processing, or
+enable `COOKIES_DEBUG` to log sent and received cookie headers.
 
 ## HTTP cache
 
@@ -662,6 +685,7 @@ The validation suite compares:
 * middleware and item pipeline behavior
 * callback and errback handling
 * HTTP headers, request serialization, curl, forms, JSON, response subclasses, and following
+* cookie domains, paths, security, expiration, isolated jars, bypasses, and transport parity
 * persistent cache hits, expiration, revalidation, repeated headers, lifecycle, and engine parity
 * native HTTP methods, bodies, repeated headers, and cookies
 * native redirects, compression, streaming, timeouts, and response limits
@@ -687,6 +711,7 @@ python benchmark/verify_crawler.py
 python benchmark/verify_crawl_spider.py
 python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
+python benchmark/verify_cookies.py
 python benchmark/verify_http_cache.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
@@ -822,6 +847,7 @@ python benchmark/verify_crawler.py
 python benchmark/verify_crawl_spider.py
 python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
+python benchmark/verify_cookies.py
 python benchmark/verify_http_cache.py
 python benchmark/verify_extensions.py
 python benchmark/verify_feed_exports.py
@@ -851,9 +877,10 @@ The current foundation includes Python and Rust crawl coordination, Scrapy-compa
 response classes, Python and Rust HTTP downloaders, spiders, middleware, item pipelines, signals,
 settings, stats, duplicate filtering, scheduling, selectors, CrawlSpider rules, native link
 candidate extraction, and Rust-owned retry, request depth, robots, download slot, and downloader
-statistics policies. Persistent native SQLite HTTP caching supports unconditional reuse and RFC
-revalidation. The native engine also owns persistent request and duplicate state, configured FIFO
-and LIFO crawl queues, and start-request precedence.
+statistics policies. Native cookie jars provide isolated Scrapy-compatible handling, while
+persistent native SQLite HTTP caching supports unconditional reuse and RFC revalidation. The native
+engine also owns persistent request and duplicate state, configured FIFO and LIFO crawl queues, and
+start-request precedence.
 The native downloader owns authenticated per-proxy connection pools. Local and standard-output feed
 exports are available through the built-in feed extension. SpiderOxide does not yet include remote
 feed storage, feed postprocessing, built-in operational extensions, SOCKS proxy support, or Scrapy

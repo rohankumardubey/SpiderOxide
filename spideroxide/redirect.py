@@ -74,11 +74,9 @@ class RedirectMiddleware:
             ):
                 headers.pop(name, None)
 
-        cookies = dict(request.cookies)
         same_host = source.hostname == redirected.hostname
         if not same_host or redirected.scheme not in {source.scheme, "https"}:
             headers.pop("Cookie", None)
-            cookies.clear()
         if (
             source.scheme != redirected.scheme
             or not same_host
@@ -105,7 +103,7 @@ class RedirectMiddleware:
             method=method,
             headers=headers,
             body=body,
-            cookies=cookies,
+            cookies={},
             meta=meta,
             priority=request.priority + self.priority_adjust,
             dont_filter=request.dont_filter,
