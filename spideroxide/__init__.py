@@ -15,6 +15,7 @@ from .backend import (
     BackendUnavailableError,
     resolve_backend,
 )
+from .crawl import CrawlSpider, Rule
 from .crawler import Crawler, CrawlerRunner
 from .depth import DepthMiddleware
 from .downloader import Downloader, HttpxDownloader, RustDownloader
@@ -50,6 +51,7 @@ from .http import (
     TextResponse,
     XmlResponse,
 )
+from .linkextractors import Link, LinkExtractor, LxmlLinkExtractor
 from .proxy import HttpProxyMiddleware
 from .retry import RetryMiddleware, get_retry_request
 from .selectors import Selector, SelectorList
@@ -67,6 +69,7 @@ __all__ = [
     "CloseSpider",
     "Crawler",
     "CrawlerRunner",
+    "CrawlSpider",
     "CrawlResult",
     "CsvItemExporter",
     "DownloadError",
@@ -89,6 +92,9 @@ __all__ = [
     "JsonItemExporter",
     "JsonLinesItemExporter",
     "JsonRequest",
+    "Link",
+    "LinkExtractor",
+    "LxmlLinkExtractor",
     "NotConfigured",
     "NativeCrawlEngine",
     "PriorityRequest",
@@ -96,6 +102,7 @@ __all__ = [
     "RequestData",
     "Response",
     "RetryMiddleware",
+    "Rule",
     "RustDownloader",
     "ScheduledRequest",
     "Scheduler",

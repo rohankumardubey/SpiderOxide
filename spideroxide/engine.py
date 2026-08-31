@@ -254,7 +254,7 @@ class CrawlEngine:
         callback_exception: Exception | None = None
         try:
             await self.spider_middleware.process_input(response, self.spider)
-            callback = request.callback or self.spider.parse
+            callback = request.callback or self.spider._parse
             callback_output = callback(response, **request.cb_kwargs)
             processed, callback_exception = await self._process_spider_stream(
                 request,
@@ -272,7 +272,7 @@ class CrawlEngine:
         if callback_exception is not None:
             if request.errback is not None:
                 try:
-                    errback_output = request.errback(callback_exception)
+                    errback_output = self._call_errback(request, callback_exception)
                     recovered, errback_exception = await self._process_spider_stream(
                         request,
                         response,
@@ -310,6 +310,13 @@ class CrawlEngine:
                 response=response,
             )
         return processed
+
+    @staticmethod
+    def _call_errback(request: Request, exception: Exception) -> object:
+        assert request.errback is not None
+        if getattr(request.errback, "_spideroxide_request_context", False):
+            return request.errback(exception, request=request)
+        return request.errback(exception)
 
     async def _process_spider_stream(
         self,
@@ -360,7 +367,7 @@ class CrawlEngine:
     ) -> list[object]:
         if request.errback is not None:
             try:
-                errback_output = request.errback(exception)
+                errback_output = self._call_errback(request, exception)
             except CloseSpider:
                 raise
             except Exception as errback_exception:
@@ -409,6 +416,8 @@ class CrawlEngine:
 
     async def _process_outputs(self, outputs: list[object]) -> None:
         for output in outputs:
+            if output is None:
+                continue
             if isinstance(output, Request):
                 await self._schedule(output)
                 continue

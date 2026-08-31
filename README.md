@@ -39,6 +39,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Concurrent asynchronous crawl engine
 * Native Tokio crawl coordination with bounded start-request admission
 * Rust-native persistent crawl state with crash recovery
+* Rust-accelerated Scrapy-compatible link extraction and CrawlSpider rules
 * Scrapy-compatible CSS, XPath, and JMESPath selectors
 * Rust-owned retry policies and downloader statistics with Scrapy-compatible APIs
 * Scrapy-compatible request depth limits, priorities, and statistics
@@ -137,6 +138,44 @@ result = asyncio.run(
 
 `ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
 requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
+
+## CrawlSpider and link extraction
+
+`LinkExtractor` and `LxmlLinkExtractor` provide Scrapy-compatible URL, domain, extension, text,
+tag, attribute, CSS, and XPath filtering. Full valid HTML documents use the native Rust parser for
+candidate extraction. Restricted regions and malformed documents use the lxml-backed compatibility
+path so observable results remain stable.
+
+```python
+from spideroxide import CrawlSpider, LinkExtractor, Rule
+
+
+class CatalogSpider(CrawlSpider):
+    name = "catalog"
+    start_urls = ["https://example.com/catalog"]
+    rules = (
+        Rule(
+            LinkExtractor(
+                allow=r"/products/",
+                allow_domains="example.com",
+                restrict_css="main",
+            ),
+            callback="parse_product",
+            follow=True,
+        ),
+    )
+
+    async def parse_product(self, response):
+        return {
+            "url": response.url,
+            "name": response.css("h1::text").get(),
+        }
+```
+
+Rules support callback and errback method names, callback keyword arguments, `process_links`,
+`process_request`, recursive following, and the `CRAWLSPIDER_FOLLOW_LINKS` setting. Generated
+requests retain their rule index and link text in request metadata and remain serializable through
+`JOBDIR`.
 
 ## Spider middleware
 
@@ -615,6 +654,7 @@ Run it with:
 ```bash
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_crawl_spider.py
 python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
 python benchmark/verify_extensions.py
@@ -748,6 +788,7 @@ maturin develop -r
 python benchmark/verify_integration.py
 python benchmark/verify_correctness.py
 python benchmark/verify_crawler.py
+python benchmark/verify_crawl_spider.py
 python benchmark/verify_spider_middleware.py
 python benchmark/verify_http_models.py
 python benchmark/verify_extensions.py
@@ -776,9 +817,10 @@ URL canonicalizer intentionally implements a smaller contract than Scrapy.
 
 The current foundation includes Python and Rust crawl coordination, Scrapy-compatible request and
 response classes, Python and Rust HTTP downloaders, spiders, middleware, item pipelines, signals,
-settings, stats, duplicate filtering, scheduling, selectors, and Rust-owned retry, request depth,
-robots, download slot, and downloader statistics policies. The native engine also owns persistent
-request and duplicate state, configured FIFO and LIFO crawl queues, and start-request precedence.
+settings, stats, duplicate filtering, scheduling, selectors, CrawlSpider rules, native link
+candidate extraction, and Rust-owned retry, request depth, robots, download slot, and downloader
+statistics policies. The native engine also owns persistent request and duplicate state, configured
+FIFO and LIFO crawl queues, and start-request precedence.
 The native downloader owns authenticated per-proxy connection pools. Local and standard-output feed
 exports are available through the built-in feed extension. SpiderOxide does not yet include remote
 feed storage, feed postprocessing, built-in operational extensions, SOCKS proxy support, or Scrapy
