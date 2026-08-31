@@ -41,7 +41,15 @@ from .feedexport import (
     XmlItemExporter,
 )
 from .headers import Headers
-from .http import Request, Response, TextResponse
+from .http import (
+    FormRequest,
+    HtmlResponse,
+    JsonRequest,
+    Request,
+    Response,
+    TextResponse,
+    XmlResponse,
+)
 from .proxy import HttpProxyMiddleware
 from .retry import RetryMiddleware, get_retry_request
 from .selectors import Selector, SelectorList
@@ -71,13 +79,16 @@ __all__ = [
     "FeedSlot",
     "FingerprintRequest",
     "FileFeedStorage",
+    "FormRequest",
     "Headers",
+    "HtmlResponse",
     "IgnoreRequest",
     "HttpxDownloader",
     "HttpProxyMiddleware",
     "ItemFilter",
     "JsonItemExporter",
     "JsonLinesItemExporter",
+    "JsonRequest",
     "NotConfigured",
     "NativeCrawlEngine",
     "PriorityRequest",
@@ -97,6 +108,7 @@ __all__ = [
     "StatsCollector",
     "StdoutFeedStorage",
     "TextResponse",
+    "XmlResponse",
     "XmlItemExporter",
     "fingerprint",
     "fingerprint_batch",

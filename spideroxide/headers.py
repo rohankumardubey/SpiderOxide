@@ -2,40 +2,66 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, MutableMapping
 
-HeaderValue = str | bytes
-HeaderValues = HeaderValue | Iterable[HeaderValue]
+HeaderName = str | bytes
+HeaderValue = str | bytes | int | float
+HeaderValues = HeaderValue | Iterable[HeaderValue] | None
 
 
-def _value_bytes(value: HeaderValue) -> bytes:
-    return value if isinstance(value, bytes) else value.encode("latin-1")
+def _name_text(name: HeaderName) -> str:
+    if isinstance(name, bytes):
+        return name.decode("latin-1")
+    if not isinstance(name, str):
+        raise TypeError("header names must be strings or bytes")
+    return name
+
+
+def _value_bytes(value: HeaderValue, encoding: str) -> bytes:
+    if isinstance(value, bytes):
+        return value
+    return str(value).encode(encoding)
+
+
+def _normalize_values(value: HeaderValues, encoding: str) -> list[bytes]:
+    if value is None:
+        return []
+    if isinstance(value, (str, bytes, int, float)):
+        return [_value_bytes(value, encoding)]
+    return [_value_bytes(item, encoding) for item in value]
 
 
 class Headers(MutableMapping[str, bytes]):
     """Case-insensitive HTTP headers with support for repeated values."""
 
-    def __init__(self, values: Mapping[str, HeaderValues] | None = None) -> None:
+    def __init__(
+        self,
+        values: Mapping[HeaderName, HeaderValues]
+        | Iterable[tuple[HeaderName, HeaderValues]]
+        | None = None,
+        *,
+        encoding: str = "latin-1",
+    ) -> None:
+        self.encoding = encoding
         self._values: dict[str, tuple[str, list[bytes]]] = {}
-        if values:
-            for name, value in values.items():
-                if isinstance(value, (str, bytes)):
-                    self.setlist(name, [value])
-                else:
-                    self.setlist(name, value)
+        if isinstance(values, Headers):
+            for name, entries in values._values.values():
+                self.setlist(name, entries)
+        elif values:
+            entries = values.items() if isinstance(values, Mapping) else values
+            for name, value in entries:
+                self.appendlist(name, value)
 
     @staticmethod
-    def _key(name: str) -> str:
-        if not isinstance(name, str):
-            raise TypeError("header names must be strings")
-        return name.lower()
+    def _key(name: HeaderName) -> str:
+        return _name_text(name).lower()
 
-    def __getitem__(self, name: str) -> bytes:
+    def __getitem__(self, name: HeaderName) -> bytes:
         values = self._values[self._key(name)][1]
         return values[-1]
 
-    def __setitem__(self, name: str, value: bytes) -> None:
-        self.setlist(name, [value])
+    def __setitem__(self, name: HeaderName, value: HeaderValues) -> None:
+        self.setlist(name, value)
 
-    def __delitem__(self, name: str) -> None:
+    def __delitem__(self, name: HeaderName) -> None:
         del self._values[self._key(name)]
 
     def __iter__(self) -> Iterator[str]:
@@ -44,22 +70,29 @@ class Headers(MutableMapping[str, bytes]):
     def __len__(self) -> int:
         return len(self._values)
 
-    def getlist(self, name: str) -> list[bytes]:
+    def getlist(self, name: HeaderName) -> list[bytes]:
         entry = self._values.get(self._key(name))
         return [] if entry is None else list(entry[1])
 
-    def setlist(self, name: str, values: Iterable[HeaderValue]) -> None:
-        encoded = [_value_bytes(value) for value in values]
+    def setlist(self, name: HeaderName, values: HeaderValues) -> None:
+        display_name = _name_text(name)
+        encoded = _normalize_values(values, self.encoding)
         if not encoded:
             self._values.pop(self._key(name), None)
             return
-        self._values[self._key(name)] = (name, encoded)
+        self._values[self._key(name)] = (display_name, encoded)
 
-    def appendlist(self, name: str, value: HeaderValue) -> None:
+    def appendlist(self, name: HeaderName, value: HeaderValues) -> None:
+        encoded = _normalize_values(value, self.encoding)
+        if not encoded:
+            return
         key = self._key(name)
         if key not in self._values:
-            self._values[key] = (name, [])
-        self._values[key][1].append(_value_bytes(value))
+            self._values[key] = (_name_text(name), [])
+        self._values[key][1].extend(encoded)
+
+    def to_scrapy_dict(self) -> dict[bytes, list[bytes]]:
+        return {name.encode("latin-1"): list(values) for name, values in self._values.values()}
 
     def to_http_pairs(self) -> list[tuple[str, str]]:
         return [
@@ -72,7 +105,7 @@ class Headers(MutableMapping[str, bytes]):
         return [(name, value) for name, values in self._values.values() for value in values]
 
     def copy(self) -> Headers:
-        copied = Headers()
+        copied = Headers(encoding=self.encoding)
         for name, values in self._values.values():
             copied.setlist(name, values)
         return copied
