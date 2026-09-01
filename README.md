@@ -41,6 +41,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Rust-native persistent crawl state with crash recovery
 * Rust-accelerated Scrapy-compatible link extraction and CrawlSpider rules
 * Scrapy-compatible CSS, XPath, and JMESPath selectors
+* Scrapy-compatible Items, field metadata, Item Loaders, and processors
 * Rust-owned retry policies and downloader statistics with Scrapy-compatible APIs
 * Scrapy-compatible request depth limits, priorities, and statistics
 * Downloader and spider middleware
@@ -102,6 +103,36 @@ print(result.stats)
 
 `Spider.start()` may also be implemented as an asynchronous generator. Requests begin downloading
 as they are yielded, so startup does not need to finish before callbacks run.
+
+## Items and Item Loaders
+
+`Item` provides a mapping with an explicit field schema. `Field` metadata can configure loader input
+and output processors, serializers, or application-specific values. Undeclared fields raise
+`KeyError`, which catches schema mistakes before items reach pipelines or feed exporters.
+
+```python
+from spideroxide import Field, Item, ItemLoader, Join, MapCompose, TakeFirst
+
+
+class Product(Item):
+    name = Field(input_processor=MapCompose(str.strip), output_processor=TakeFirst())
+    price = Field(input_processor=MapCompose(float), output_processor=TakeFirst())
+    tags = Field(output_processor=Join(","))
+
+
+def parse_product(response):
+    loader = ItemLoader(item=Product(), response=response)
+    loader.add_css("name", "h1::text")
+    loader.add_css("price", ".price::attr(data-value)")
+    loader.add_value("tags", ["catalog", "featured"])
+    return loader.load_item()
+```
+
+Loaders support direct values, CSS, XPath, and JMESPath extraction; add and replace operations;
+nested selectors; loader contexts; and per-loader, per-field, or default processors. `MapCompose`,
+`Compose`, `TakeFirst`, `Join`, `Identity`, and `SelectJmes` follow the Item Loaders processing
+contract. The shared `ItemAdapter` also supports dictionaries, dataclasses, attrs classes, and
+Pydantic models, so those item types use the same loader and pipeline path.
 
 The HTTPX downloader is the default. Select the native Rust downloader explicitly:
 
@@ -693,6 +724,7 @@ The validation suite compares:
 * native concurrency, backpressure, streaming starts, cancellation, and cleanup
 * native job locking, WAL recovery, callbacks, spider state, hard crashes, and schema checks
 * CSS, XPath, XML namespace, JSON, malformed HTML, encoding, and base URL selector behavior
+* item schemas, field metadata, adapters, loaders, processors, nesting, and engine parity
 * retry status codes, exceptions, limits, opt-outs, request overrides, stats, and engine parity
 * native policy ownership, exception inheritance, arbitrary priorities, fallback, and extension stats
 * request depth limits, priority adjustments, verbose stats, arbitrary integers, and engine parity
@@ -874,10 +906,11 @@ native scheduling state through `JOBDIR`, while crawl results and statistics rem
 URL canonicalizer intentionally implements a smaller contract than Scrapy.
 
 The current foundation includes Python and Rust crawl coordination, Scrapy-compatible request and
-response classes, Python and Rust HTTP downloaders, spiders, middleware, item pipelines, signals,
-settings, stats, duplicate filtering, scheduling, selectors, CrawlSpider rules, native link
-candidate extraction, and Rust-owned retry, request depth, robots, download slot, and downloader
-statistics policies. Native cookie jars provide isolated Scrapy-compatible handling, while
+response classes, Python and Rust HTTP downloaders, spiders, middleware, structured Items, Item
+Loaders, item pipelines, signals, settings, stats, duplicate filtering, scheduling, selectors,
+CrawlSpider rules, native link candidate extraction, and Rust-owned retry, request depth, robots,
+download slot, and downloader statistics policies. Native cookie jars provide isolated
+Scrapy-compatible handling, while
 persistent native SQLite HTTP caching supports unconditional reuse and RFC revalidation. The native
 engine also owns persistent request and duplicate state, configured FIFO and LIFO crawl queues, and
 start-request precedence.

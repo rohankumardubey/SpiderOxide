@@ -7,7 +7,7 @@ from typing import Any, ClassVar, cast
 from .http import HtmlResponse, Request, Response
 from .linkextractors import Link, LinkExtractor
 from .spider import Spider
-from .utils import maybe_await
+from .utils import _is_output_collection, maybe_await
 
 CallbackReference = Callable[..., object] | str | None
 ProcessLinksReference = Callable[[list[Link]], Iterable[Link]] | str | None
@@ -38,7 +38,7 @@ async def _iterate_outputs(value: object) -> AsyncIterator[object]:
         async for output in value:
             yield output
         return
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+    if _is_output_collection(value):
         for output in value:
             yield output
         return

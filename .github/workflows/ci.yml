@@ -98,7 +98,7 @@ jobs:
       - name: Verify persistent job state
         run: .venv/bin/python benchmark/verify_job_state.py
 
-      - name: Verify selectors
+      - name: Verify selectors, items, and loaders
         run: .venv/bin/python benchmark/verify_selectors.py
 
       - name: Verify retry policy
