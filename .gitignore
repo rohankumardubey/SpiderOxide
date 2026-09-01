@@ -9,6 +9,14 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Accidental repository-root virtual environments
+/bin/
+/lib/
+/include/
+/lib64/
+/share/
+/pyvenv.cfg
+
 # Rust
 rust_impl/target/
 
