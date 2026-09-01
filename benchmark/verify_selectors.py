@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from pprint import pformat
 from unittest.mock import patch
 
 from parsel.csstranslator import ExpressionError
@@ -13,13 +15,23 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from spideroxide import (
+    Compose,
     Crawler,
+    Field,
     Headers,
+    Identity,
+    Item,
+    ItemAdapter,
+    ItemLoader,
+    Join,
+    MapCompose,
     Request,
     Response,
+    SelectJmes,
     Selector,
     SelectorList,
     Spider,
+    TakeFirst,
     TextResponse,
 )
 
@@ -263,6 +275,168 @@ def _verify_errors() -> None:
         raise AssertionError("invalid XPath was accepted")
 
 
+def _contextual_clean(value: str, loader_context: dict[str, object]) -> str:
+    return f"{loader_context['prefix']}{value.strip()}"
+
+
+class BaseProductItem(Item):
+    sku = Field(serializer=str)
+
+
+class ProductItem(BaseProductItem):
+    sku = Field(serializer=lambda value: f"SKU-{value}")
+    name = Field(input_processor=MapCompose(str.strip), output_processor=TakeFirst())
+    price = Field(
+        input_processor=MapCompose(lambda value: float(value.strip())),
+        output_processor=TakeFirst(),
+    )
+    tags = Field(output_processor=Join("|"))
+    contextual = Field(
+        input_processor=MapCompose(_contextual_clean),
+        output_processor=TakeFirst(),
+    )
+
+
+class AnnotatedItem(Item):
+    count: int = Field()
+
+
+@dataclass
+class DataclassProduct:
+    name: str | None = field(
+        default=None,
+        metadata={"output_processor": TakeFirst()},
+    )
+
+
+def _verify_items() -> None:
+    assert list(ProductItem.fields) == ["sku", "name", "price", "tags", "contextual"]
+    assert ProductItem.fields["sku"]["serializer"]("7") == "SKU-7"
+
+    item = ProductItem(sku="7", tags=["drink"])
+    item["name"] = "Coffee"
+    assert dict(item) == {"sku": "7", "tags": ["drink"], "name": "Coffee"}
+    assert ItemAdapter.is_item(item)
+    assert hasattr(ItemAdapter.ADAPTER_CLASSES, "appendleft")
+    adapter = ItemAdapter(item)
+    assert list(adapter.field_names()) == list(ProductItem.fields)
+    assert adapter.get_field_meta("sku")["serializer"]("8") == "SKU-8"
+    assert ItemAdapter.get_field_names_from_class(ProductItem) == list(ProductItem.fields)
+    schema = ItemAdapter.get_json_schema(AnnotatedItem)
+    assert schema["properties"]["count"]["type"] == "integer"
+    assert "required" not in schema
+
+    copied = item.copy()
+    copied["name"] = "Tea"
+    assert item["name"] == "Coffee"
+    deep = item.deepcopy()
+    deep["tags"].append("hot")
+    assert item["tags"] == ["drink"]
+    assert hash(item) != hash(copied)
+    assert repr(item) == pformat(dict(item))
+
+    for operation in (
+        lambda: item["missing"],
+        lambda: item.__setitem__("missing", True),
+    ):
+        try:
+            operation()
+        except KeyError:
+            pass
+        else:
+            raise AssertionError("undeclared item field was accepted")
+
+    try:
+        assert item.name == "Coffee"
+    except AttributeError as error:
+        assert "item['name']" in str(error)
+    else:
+        raise AssertionError("field value was exposed as an attribute")
+
+    try:
+        item.name = "forbidden"
+    except AttributeError as error:
+        assert "item['name']" in str(error)
+    else:
+        raise AssertionError("field value was assigned as an attribute")
+
+
+def _verify_loader_processors() -> None:
+    assert MapCompose(str.strip, str.upper)([" one ", " two "]) == ["ONE", "TWO"]
+    assert Compose(lambda values: values[0], str.upper)(["coffee"]) == "COFFEE"
+    assert TakeFirst()(["", None, 0, "later"]) == 0
+    assert Identity()(["one"]) == ["one"]
+    assert Join(",")(["one", "two"]) == "one,two"
+    assert SelectJmes("products[*].name")({"products": [{"name": "Coffee"}, {"name": "Tea"}]}) == [
+        "Coffee",
+        "Tea",
+    ]
+
+    loader = ItemLoader(item=ProductItem(), response=_html_response(), prefix="prefix:")
+    assert loader.context["response"].url == "https://example.test/catalog"
+    assert loader.context["selector"] is loader.selector
+    loader.add_value("sku", "100")
+    loader.add_css("name", "article.product h2::text")
+    loader.add_css("price", "article.product .price::text")
+    loader.add_value("tags", ["drink", "hot"])
+    loader.add_value("contextual", " value ")
+    assert loader.get_css("article.product h2::text", TakeFirst()) == "Καφές"
+    assert loader.get_xpath("//article[1]/@data-id", TakeFirst()) == "α-1"
+    assert loader.get_collected_values("name")[:2] == ["Καφές", "Tea"]
+
+    item = loader.load_item()
+    assert isinstance(item, ProductItem)
+    assert dict(item) == {
+        "sku": ["100"],
+        "name": "Καφές",
+        "price": 12.5,
+        "tags": "drink|hot",
+        "contextual": "prefix:value",
+    }
+
+    nested_loader = ItemLoader(item=ProductItem(), response=_html_response())
+    featured = nested_loader.nested_css("article.featured")
+    featured.add_css("name", "h2::text")
+    assert nested_loader.load_item()["name"] == "Καφές"
+
+    loader.replace_value("tags", ["fresh"])
+    assert loader.get_output_value("tags") == "fresh"
+    loader.add_value(None, {"tags": ["new"], "sku": "200"})
+    assert loader.get_collected_values("tags") == ["fresh", "new"]
+
+    dataclass_loader = ItemLoader(item=DataclassProduct(), response=_html_response())
+    dataclass_loader.add_css("name", "article.product h2::text")
+    assert dataclass_loader.load_item().name == "Καφές"
+
+    class ResponseSelector:
+        def __init__(self, response: TextResponse) -> None:
+            self.response = response
+
+    class CustomSelectorLoader(ItemLoader):
+        default_selector_class = ResponseSelector
+
+    custom = CustomSelectorLoader(item=ProductItem(), response=_html_response())
+    assert isinstance(custom.selector, ResponseSelector)
+    assert custom.selector.response.url == "https://example.test/catalog"
+
+    class DerivedSelector(Selector):
+        pass
+
+    class DerivedSelectorLoader(ItemLoader):
+        default_selector_class = DerivedSelector
+
+    derived = DerivedSelectorLoader(item=ProductItem(), response=_html_response())
+    assert isinstance(derived.selector, DerivedSelector)
+    assert derived.selector.css("title::text").get() == "SpiderOxide selectors"
+
+    try:
+        ItemLoader(item=ProductItem()).add_css("name", "h2::text")
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError("selector extraction without a selector was accepted")
+
+
 class SelectorDownloader:
     async def fetch(self, request: Request) -> Response:
         return TextResponse(
@@ -290,6 +464,20 @@ class SelectorSpider(Spider):
         ]
 
 
+class StructuredSelectorSpider(Spider):
+    name = "structured_selectors"
+    start_urls = ["https://example.test/catalog"]
+
+    def parse(self, response: TextResponse) -> ProductItem:
+        loader = ItemLoader(item=ProductItem(), response=response, prefix="")
+        loader.add_value("sku", "catalog")
+        loader.add_css("name", "article.product h2::text")
+        loader.add_css("price", "article.product .price::text")
+        loader.add_value("tags", ["crawler", "structured"])
+        loader.add_value("contextual", "ready")
+        return loader.load_item()
+
+
 async def _verify_crawler_integration() -> None:
     result = await Crawler(SelectorSpider, downloader=SelectorDownloader()).crawl()
     assert result.items == (
@@ -297,6 +485,16 @@ async def _verify_crawler_integration() -> None:
         {"name": "Tea", "href": "tea.html"},
         {"name": "Malformed\n    ", "href": None},
     )
+    for engine in ("python", "rust"):
+        structured = await Crawler(
+            StructuredSelectorSpider,
+            {"ENGINE_BACKEND": engine},
+            downloader=SelectorDownloader(),
+        ).crawl()
+        assert len(structured.items) == 1
+        assert isinstance(structured.items[0], ProductItem)
+        assert structured.items[0]["name"] == "Καφές"
+        assert structured.items[0]["tags"] == "crawler|structured"
 
 
 def run_selector_checks() -> None:
@@ -306,9 +504,14 @@ def run_selector_checks() -> None:
     _verify_document_encodings()
     _verify_json_selectors()
     _verify_errors()
+    _verify_items()
+    _verify_loader_processors()
     asyncio.run(_verify_crawler_integration())
 
 
 if __name__ == "__main__":
     run_selector_checks()
-    print("Selectors passed: CSS, XPath, XML namespaces, JSON, regex, chaining, and errors")
+    print(
+        "Selectors and items passed: CSS, XPath, XML namespaces, JSON, item schemas, "
+        "loaders, processors, nesting, and engine parity"
+    )

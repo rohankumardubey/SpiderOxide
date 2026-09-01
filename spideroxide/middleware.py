@@ -6,7 +6,7 @@ from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, I
 from .components import build_components
 from .exceptions import CloseSpider, DropItem
 from .http import Request, Response
-from .utils import maybe_await
+from .utils import _is_output_collection, maybe_await
 
 DownloadCallable = Callable[[Request], Awaitable[Response]]
 
@@ -59,7 +59,7 @@ async def _iterate_middleware_output(
         async for item in value:
             yield item
         return
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+    if _is_output_collection(value):
         for item in value:
             yield item
         return
@@ -79,7 +79,7 @@ async def _iterate_spider_output(value: object) -> AsyncIterator[object]:
         async for item in value:
             yield item
         return
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+    if _is_output_collection(value):
         for item in value:
             yield item
         return
@@ -427,7 +427,7 @@ class SpiderMiddlewareManager:
     def _validate_start_output(value: object, method_name: str) -> None:
         if isinstance(value, AsyncIterable):
             return
-        if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
+        if _is_output_collection(value):
             return
         raise _InvalidMiddlewareOutput(f"{method_name} must return an iterable")
 

@@ -61,12 +61,30 @@ from .httpcache import (
 from .linkextractors import Link, LinkExtractor, LxmlLinkExtractor
 from .proxy import HttpProxyMiddleware
 from .retry import RetryMiddleware, get_retry_request
-from .selectors import Selector, SelectorList
+from .selectors import (
+    Compose,
+    Identity,
+    ItemLoader,
+    Join,
+    MapCompose,
+    SelectJmes,
+    Selector,
+    SelectorList,
+    TakeFirst,
+)
 from .settings import Settings
 from .signals import SignalManager
 from .spider import Spider
 from .stats import StatsCollector
-from .types import FingerprintRequest, PriorityRequest, RequestData, ScheduledRequest
+from .types import (
+    Field,
+    FingerprintRequest,
+    Item,
+    ItemAdapter,
+    PriorityRequest,
+    RequestData,
+    ScheduledRequest,
+)
 
 __all__ = [
     "BACKEND_ENV_VAR",
@@ -74,6 +92,7 @@ __all__ = [
     "BackendUnavailableError",
     "BaseItemExporter",
     "CloseSpider",
+    "Compose",
     "CookiesMiddleware",
     "Crawler",
     "CrawlerRunner",
@@ -87,6 +106,7 @@ __all__ = [
     "DropItem",
     "DupeFilter",
     "ExtensionManager",
+    "Field",
     "FeedExporter",
     "FeedSlot",
     "FingerprintRequest",
@@ -98,13 +118,19 @@ __all__ = [
     "HttpxDownloader",
     "HttpProxyMiddleware",
     "HttpCacheMiddleware",
+    "Item",
+    "ItemAdapter",
     "ItemFilter",
+    "ItemLoader",
+    "Identity",
     "JsonItemExporter",
     "JsonLinesItemExporter",
     "JsonRequest",
+    "Join",
     "Link",
     "LinkExtractor",
     "LxmlLinkExtractor",
+    "MapCompose",
     "NotConfigured",
     "NativeCrawlEngine",
     "NativeHttpCacheStorage",
@@ -117,6 +143,7 @@ __all__ = [
     "Rule",
     "RustDownloader",
     "ScheduledRequest",
+    "SelectJmes",
     "Scheduler",
     "Selector",
     "SelectorList",
@@ -127,6 +154,7 @@ __all__ = [
     "StatsCollector",
     "StdoutFeedStorage",
     "TextResponse",
+    "TakeFirst",
     "XmlResponse",
     "XmlItemExporter",
     "fingerprint",

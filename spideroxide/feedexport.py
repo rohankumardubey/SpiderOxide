@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
@@ -16,6 +16,8 @@ from typing import Any, BinaryIO
 from urllib.parse import unquote, urlsplit
 from xml.sax.saxutils import XMLGenerator
 from xml.sax.xmlreader import AttributesImpl
+
+from itemadapter import ItemAdapter
 
 from . import signals
 from .components import load_object
@@ -62,6 +64,8 @@ def _path_template_uri(path: Path) -> str:
 
 class SpiderOxideJSONEncoder(json.JSONEncoder):
     def default(self, value: object) -> object:
+        if isinstance(value, bytes):
+            return value.decode("utf-8")
         if isinstance(value, set):
             return list(value)
         if isinstance(value, datetime):
@@ -106,6 +110,15 @@ class BaseItemExporter:
     def finish_exporting(self) -> None:
         pass
 
+    def serialize_field(
+        self,
+        field: Mapping[str, object],
+        name: str,
+        value: object,
+    ) -> object:
+        serializer: Callable[[object], object] = field.get("serializer", lambda item: item)  # type: ignore[assignment]
+        return serializer(value)
+
     def _serialized_fields(
         self,
         item: object,
@@ -113,20 +126,37 @@ class BaseItemExporter:
         default_value: object = None,
         include_empty: bool | None = None,
     ) -> Iterable[tuple[str, object]]:
-        values = _item_mapping(item)
         include_empty = self.export_empty_fields if include_empty is None else include_empty
+        adapter = ItemAdapter(item) if ItemAdapter.is_item(item) else None
+        values = dict(adapter.items()) if adapter is not None else _item_mapping(item)
         fields = self.fields_to_export
         if fields is None:
-            field_iter: Iterable[str | tuple[str, str]] = values
+            field_iter: Iterable[str | tuple[str, str]] = (
+                adapter.field_names() if adapter is not None and include_empty else values
+            )
         elif isinstance(fields, Mapping):
-            field_iter = fields.items()
-        else:
+            field_iter = (
+                fields.items()
+                if include_empty
+                else ((name, output) for name, output in fields.items() if name in values)
+            )
+        elif include_empty:
             field_iter = fields
+        else:
+            field_iter = (name for name in fields if name in values)
 
         for field in field_iter:
             input_name, output_name = (field, field) if isinstance(field, str) else field
             if input_name in values:
-                yield output_name, values[input_name]
+                metadata = adapter.get_field_meta(input_name) if adapter is not None else {}
+                yield (
+                    output_name,
+                    self.serialize_field(
+                        metadata,
+                        output_name,
+                        values[input_name],
+                    ),
+                )
             elif include_empty:
                 yield output_name, default_value
 
@@ -194,6 +224,7 @@ class CsvItemExporter(BaseItemExporter):
         self.encoding = self.encoding or "utf-8"
         self.include_headers_line = include_headers_line
         self.join_multivalued = join_multivalued
+        self.errors = errors or "strict"
         self.stream = TextIOWrapper(
             file,
             encoding=self.encoding,
@@ -212,11 +243,29 @@ class CsvItemExporter(BaseItemExporter):
                 pass
         return value
 
+    def _row_value(self, value: object) -> object:
+        if isinstance(value, bytes):
+            return value.decode(self.encoding, errors=self.errors)
+        return value
+
+    def serialize_field(
+        self,
+        field: Mapping[str, object],
+        name: str,
+        value: object,
+    ) -> object:
+        serializer: Callable[[object], object] = field.get("serializer", self._cell)  # type: ignore[assignment]
+        return serializer(value)
+
     def export_item(self, item: object) -> None:
         if not self.headers_written:
             self.headers_written = True
             if self.fields_to_export is None:
-                self.fields_to_export = tuple(_item_mapping(item))
+                self.fields_to_export = tuple(
+                    ItemAdapter(item).field_names()
+                    if ItemAdapter.is_item(item)
+                    else _item_mapping(item)
+                )
             if self.include_headers_line:
                 headers = (
                     self.fields_to_export.values()
@@ -225,7 +274,7 @@ class CsvItemExporter(BaseItemExporter):
                 )
                 self.writer.writerow(headers)
         fields = self._serialized_fields(item, default_value="", include_empty=True)
-        self.writer.writerow(self._cell(value) for _, value in fields)
+        self.writer.writerow(self._row_value(value) for _, value in fields)
 
     def finish_exporting(self) -> None:
         self.stream.detach()

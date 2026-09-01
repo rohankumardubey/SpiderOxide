@@ -1,4 +1,6 @@
 maturin>=1.7,<2
 ruff>=0.9,<1
 httpx>=0.27,<1
+itemadapter>=0.13,<1
+itemloaders>=1.4,<2
 parsel>=1.10,<2

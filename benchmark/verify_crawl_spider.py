@@ -14,7 +14,9 @@ from spideroxide._native import extract_link_candidates
 from spideroxide import (
     Crawler,
     CrawlSpider,
+    Field,
     HtmlResponse,
+    Item,
     Link,
     LinkExtractor,
     Request,
@@ -322,6 +324,18 @@ class ParseHookSpider(ProductSpider):
                 yield output
 
 
+class CrawlItem(Item):
+    kind = Field()
+
+
+class ItemOutputSpider(CrawlSpider):
+    name = "item-output"
+    start_urls = ["https://example.test/start"]
+
+    def parse_start_url(self, response: HtmlResponse) -> CrawlItem:
+        return CrawlItem(kind="start")
+
+
 async def _verify_engine(engine: str) -> None:
     downloader = MappingDownloader()
     result = await Crawler(
@@ -390,6 +404,18 @@ async def _verify_engine(engine: str) -> None:
         downloader=MappingDownloader(),
     ).crawl()
     assert parse_hook.items == ({"kind": "start", "processed": True, "parse_hook": True},)
+
+    item_output = await Crawler(
+        ItemOutputSpider,
+        {
+            "ENGINE_BACKEND": engine,
+            "CRAWLSPIDER_FOLLOW_LINKS": False,
+        },
+        downloader=MappingDownloader(),
+    ).crawl()
+    assert len(item_output.items) == 1
+    assert isinstance(item_output.items[0], CrawlItem)
+    assert item_output.items[0]["kind"] == "start"
 
 
 async def _verify() -> None:

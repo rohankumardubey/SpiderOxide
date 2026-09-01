@@ -19,7 +19,11 @@ if str(ROOT) not in sys.path:
 from spideroxide import (
     BaseItemExporter,
     Crawler,
+    CsvItemExporter,
     FeedExporter,
+    Field,
+    Item,
+    JsonLinesItemExporter,
     Request,
     Response,
     Spider,
@@ -35,19 +39,50 @@ class FeedDownloader:
         pass
 
 
+class FormatItem(Item):
+    name = Field()
+    value = Field()
+    tags = Field()
+    created = Field()
+    unused = Field()
+
+
+class SerializedItem(Item):
+    name = Field(serializer=str.upper)
+    encoded = Field(serializer=lambda value: value.encode("utf-8"))
+    missing = Field()
+
+
 class FormatSpider(Spider):
     name = "format_spider"
     start_urls = ["https://example.test/one", "https://example.test/two"]
 
-    def parse(self, response: Response) -> dict[str, object]:
+    def parse(self, response: Response) -> FormatItem:
         number = 1 if response.url.endswith("/one") else 2
-        return {
-            "name": f"café-{number}",
-            "value": number,
-            "tags": ["red", "blue"],
-            "created": datetime(2026, 8, number, 12, 30),
-            "unused": True,
-        }
+        return FormatItem(
+            name=f"café-{number}",
+            value=number,
+            tags=["red", "blue"],
+            created=datetime(2026, 8, number, 12, 30),
+            unused=True,
+        )
+
+
+def _verify_item_field_serialization() -> None:
+    output = BytesIO()
+    exporter = JsonLinesItemExporter(output, export_empty_fields=True)
+    exporter.export_item(SerializedItem(name="coffee", encoded="café"))
+    assert json.loads(output.getvalue()) == {
+        "name": "COFFEE",
+        "encoded": "café",
+        "missing": None,
+    }
+
+    csv_output = BytesIO()
+    csv_exporter = CsvItemExporter(csv_output, encoding="utf-8")
+    csv_exporter.export_item(SerializedItem(name="coffee", encoded="café"))
+    csv_exporter.finish_exporting()
+    assert csv_output.getvalue().decode() == "name,encoded,missing\r\nCOFFEE,café,\r\n"
 
 
 class EmptySpider(Spider):
@@ -462,6 +497,7 @@ async def _verify_storage_failure(engine: str) -> None:
 
 
 async def _verify() -> None:
+    _verify_item_field_serialization()
     for engine in ("python", "rust"):
         with tempfile.TemporaryDirectory(prefix=f"spideroxide-feeds-{engine}-") as temporary:
             directory = Path(temporary)

@@ -25,6 +25,8 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.27,<1",
+    "itemadapter>=0.13,<1",
+    "itemloaders>=1.4,<2",
     "parsel>=1.10,<2",
 ]
 
@@ -42,6 +44,10 @@ manifest-path = "rust_impl/Cargo.toml"
 python-source = "."
 python-packages = ["spideroxide"]
 module-name = "spideroxide._native"
+include = [
+    { path = "spideroxide/**/*.py", format = ["sdist", "wheel"] },
+    { path = "spideroxide/py.typed", format = ["sdist", "wheel"] },
+]
 exclude = [
     { path = "rust_impl/Cargo.lock", format = "wheel" },
     { path = "rust_impl/Cargo.toml", format = "wheel" },
