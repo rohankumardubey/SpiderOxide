@@ -80,6 +80,9 @@ jobs:
       - name: Verify HTTP cache
         run: .venv/bin/python benchmark/verify_http_cache.py
 
+      - name: Verify media pipelines
+        run: .venv/bin/python benchmark/verify_media_pipelines.py
+
       - name: Verify extensions
         run: .venv/bin/python benchmark/verify_extensions.py
 

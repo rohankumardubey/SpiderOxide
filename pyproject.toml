@@ -31,6 +31,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+images = [
+    "Pillow>=10,<13",
+]
 dev = [
     "maturin>=1.7,<2",
     "ruff>=0.9,<1",
@@ -85,6 +88,7 @@ select = ["E", "F", "I", "UP", "B"]
 "benchmark/verify_feed_exports.py" = ["E402"]
 "benchmark/verify_http_models.py" = ["E402"]
 "benchmark/verify_http_cache.py" = ["E402"]
+"benchmark/verify_media_pipelines.py" = ["E402"]
 "benchmark/verify_cookies.py" = ["E402"]
 "benchmark/verify_job_state.py" = ["E402"]
 "benchmark/benchmark_scrapy.py" = ["E402"]

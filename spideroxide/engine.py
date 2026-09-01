@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Callable
+import warnings
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from . import signals
@@ -73,6 +74,7 @@ class CrawlEngine:
         self.concurrent_requests = self.settings.getint("CONCURRENT_REQUESTS", 16)
         if self.concurrent_requests < 1:
             raise ValueError("CONCURRENT_REQUESTS must be at least 1")
+        self._internal_downloads = asyncio.Semaphore(self.concurrent_requests)
         self.items: list[object] = []
 
     async def crawl(self) -> CrawlResult:
@@ -249,6 +251,38 @@ class CrawlEngine:
 
     async def _download(self, request: Request) -> Request | Response:
         return await self.downloader_middleware.download(request, self.downloader.fetch)
+
+    async def download_async(self, request: Request) -> Response:
+        """Download an internal request through downloader middleware."""
+        if request.meta.get("_robotstxt_request", False):
+            return await self._download_internal(request)
+        async with self._internal_downloads:
+            return await self._download_internal(request)
+
+    async def _download_internal(self, request: Request) -> Response:
+        current = request
+        for _ in range(100):
+            result = await self._download(current)
+            if isinstance(result, Response):
+                response = result if result.request is not None else result.replace(request=current)
+                await self.signals.send(
+                    signals.response_received,
+                    response=response,
+                    request=current,
+                    spider=self.spider,
+                )
+                return response
+            current = result
+        raise RuntimeError("download exceeded 100 middleware redirects or retries")
+
+    def download(self, request: Request) -> Awaitable[Response]:
+        warnings.warn(
+            "CrawlEngine.download() returns an awaitable in SpiderOxide; "
+            "use download_async() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.download_async(request)
 
     async def _run_callback(self, request: Request, response: Response) -> list[object]:
         callback_exception: Exception | None = None

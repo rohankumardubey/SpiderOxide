@@ -48,6 +48,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Item pipelines, signals, settings, and crawl statistics
 * Scrapy-compatible cookie middleware with isolated native cookie jars
 * Persistent Scrapy-compatible HTTP caching with native SQLite storage
+* Scrapy-compatible file and image pipelines with native persistent storage
 * Streaming HTTP downloads with repeated header support
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
@@ -133,6 +134,52 @@ nested selectors; loader contexts; and per-loader, per-field, or default process
 `Compose`, `TakeFirst`, `Join`, `Identity`, and `SelectJmes` follow the Item Loaders processing
 contract. The shared `ItemAdapter` also supports dictionaries, dataclasses, attrs classes, and
 Pydantic models, so those item types use the same loader and pipeline path.
+
+## File and image pipelines
+
+`FilesPipeline` and `ImagesPipeline` download media yielded in item URL fields without sending those
+requests through the scheduler. Downloads still pass through downloader middleware, including
+cookies, redirects, retries, proxies, caching, and native download slots. Requests with the same
+fingerprint share one crawl-lifetime result, including failures.
+
+```python
+from spideroxide import Spider
+
+
+class ProductSpider(Spider):
+    name = "products"
+    start_urls = ["https://example.com/products"]
+
+    def parse(self, response):
+        yield {
+            "file_urls": ["https://example.com/manual.pdf"],
+            "image_urls": ["https://example.com/photo.png"],
+        }
+
+
+settings = {
+    "ITEM_PIPELINES": {
+        "spideroxide.pipelines.FilesPipeline": 100,
+        "spideroxide.pipelines.ImagesPipeline": 200,
+    },
+    "FILES_STORE": "downloads/files",
+    "IMAGES_STORE": "downloads/images",
+    "IMAGES_THUMBS": {"small": (120, 120)},
+}
+```
+
+Files are stored under `full/<sha1><extension>`. Images are validated, EXIF-transposed, converted to
+RGB JPEG when needed, and stored under `full/<sha1>.jpg`; thumbnails use
+`thumbs/<name>/<sha1>.jpg`. Results contain `url`, `path`, `checksum`, and a `downloaded`, `cached`,
+or `uptodate` status. Local persistence, atomic replacement, MD5 checksums, and freshness metadata
+are handled by `NativeMediaStore`.
+
+Set `FILES_URLS_FIELD`, `FILES_RESULT_FIELD`, `FILES_EXPIRES`, `IMAGES_URLS_FIELD`,
+`IMAGES_RESULT_FIELD`, `IMAGES_EXPIRES`, `IMAGES_MIN_WIDTH`, `IMAGES_MIN_HEIGHT`, and
+`IMAGES_THUMBS` to customize behavior. Redirects are rejected by default; enable
+`MEDIA_ALLOW_REDIRECTS` when media endpoints redirect. Image support requires
+`pip install "spideroxide[images]"`. The built-in media stores currently support local paths and
+`file://` URLs.
 
 The HTTPX downloader is the default. Select the native Rust downloader explicitly:
 
@@ -914,10 +961,11 @@ Scrapy-compatible handling, while
 persistent native SQLite HTTP caching supports unconditional reuse and RFC revalidation. The native
 engine also owns persistent request and duplicate state, configured FIFO and LIFO crawl queues, and
 start-request precedence.
-The native downloader owns authenticated per-proxy connection pools. Local and standard-output feed
-exports are available through the built-in feed extension. SpiderOxide does not yet include remote
-feed storage, feed postprocessing, built-in operational extensions, SOCKS proxy support, or Scrapy
-command-line compatibility.
+The native downloader owns authenticated per-proxy connection pools. Local file and image pipelines
+provide persistent freshness checks, checksums, image conversion, and thumbnails. Local and
+standard-output feed exports are available through the built-in feed extension. SpiderOxide does not
+yet include remote media or feed storage, feed postprocessing, built-in operational extensions,
+SOCKS proxy support, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.

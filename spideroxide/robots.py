@@ -89,7 +89,7 @@ class RobotsTxtMiddleware:
         engine = self.crawler.engine
         if engine is None:
             raise RuntimeError("crawler engine is not initialized")
-        current = Request(
+        request = Request(
             url,
             headers=Headers({"User-Agent": self.default_user_agent}),
             meta={
@@ -99,9 +99,4 @@ class RobotsTxtMiddleware:
             priority=self.download_priority,
             dont_filter=True,
         )
-        for _ in range(100):
-            result = await engine._download(current)
-            if isinstance(result, Response):
-                return result
-            current = result
-        raise RuntimeError("robots.txt download exceeded 100 middleware redirects or retries")
+        return await engine.download_async(request)
