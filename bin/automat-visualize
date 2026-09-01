@@ -1,6 +1,0 @@
-#!/Users/rohan.dubey2/Developer/Github/SpiderOxide/bin/python3
-import sys
-from automat._visualize import tool
-if __name__ == '__main__':
-    sys.argv[0] = sys.argv[0].removesuffix('.exe')
-    sys.exit(tool())
