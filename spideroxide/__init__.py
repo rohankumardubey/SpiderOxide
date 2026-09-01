@@ -59,6 +59,15 @@ from .httpcache import (
     RFC2616Policy,
 )
 from .linkextractors import Link, LinkExtractor, LxmlLinkExtractor
+from .pipelines import (
+    FileException,
+    FileInfo,
+    FilesPipeline,
+    FSFilesStore,
+    ImageException,
+    ImagesPipeline,
+    MediaPipeline,
+)
 from .proxy import HttpProxyMiddleware
 from .retry import RetryMiddleware, get_retry_request
 from .selectors import (
@@ -109,8 +118,12 @@ __all__ = [
     "Field",
     "FeedExporter",
     "FeedSlot",
+    "FileException",
     "FingerprintRequest",
     "FileFeedStorage",
+    "FileInfo",
+    "FilesPipeline",
+    "FSFilesStore",
     "FormRequest",
     "Headers",
     "HtmlResponse",
@@ -118,6 +131,8 @@ __all__ = [
     "HttpxDownloader",
     "HttpProxyMiddleware",
     "HttpCacheMiddleware",
+    "ImageException",
+    "ImagesPipeline",
     "Item",
     "ItemAdapter",
     "ItemFilter",
@@ -131,6 +146,7 @@ __all__ = [
     "LinkExtractor",
     "LxmlLinkExtractor",
     "MapCompose",
+    "MediaPipeline",
     "NotConfigured",
     "NativeCrawlEngine",
     "NativeHttpCacheStorage",

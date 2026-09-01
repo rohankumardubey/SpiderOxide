@@ -15,6 +15,7 @@ cookie = "0.18"
 cookie_store = { version = "0.22", default-features = false, features = ["preserve_order"] }
 futures-util = "0.3"
 fs2 = "0.4"
+md-5 = "0.10"
 num-bigint = "0.4"
 psl = "2"
 pyo3 = { version = "0.25", features = ["extension-module"] }
