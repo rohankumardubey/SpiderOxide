@@ -1,4 +1,4 @@
-![SpiderOxide](assets/spideroxide-logo.svg)
+![SpiderOxide](docs/assets/spideroxide-logo.svg)
 
 <p align="center">
   <a href="https://www.python.org/">
@@ -809,27 +809,7 @@ parameters, fragments, default ports, request methods, bodies, priorities, and e
 Run it with:
 
 ```bash
-python benchmark/verify_correctness.py
-python benchmark/verify_crawler.py
-python benchmark/verify_crawl_spider.py
-python benchmark/verify_spider_middleware.py
-python benchmark/verify_http_models.py
-python benchmark/verify_cookies.py
-python benchmark/verify_http_cache.py
-python benchmark/verify_extensions.py
-python benchmark/verify_feed_exports.py
-python benchmark/verify_native_downloader.py
-python benchmark/verify_native_engine.py
-python benchmark/verify_scheduler_queues.py
-python benchmark/verify_job_state.py
-python benchmark/verify_selectors.py
-python benchmark/verify_retry.py
-python benchmark/verify_native_policy.py
-python benchmark/verify_depth.py
-python benchmark/verify_native_slots.py
-python benchmark/verify_redirect.py
-python benchmark/verify_proxy.py
-python benchmark/verify_native_robots.py
+python tests/run_all.py
 ```
 
 The standard validation uses 10,000 deterministic requests with a fixed random seed.
@@ -899,31 +879,42 @@ pipelines, reactor overhead, and complete crawl behavior. They must not be inter
 end-to-end Scrapy crawl speedup.
 
 The complete 10,000 and 100,000 request results are available in the
-[Scrapy comparison report](results/scrapy_comparison.md),
-[JSON data](results/scrapy_comparison.json), and
-[CSV data](results/scrapy_comparison.csv).
+[Scrapy comparison report](benchmarks/results/scrapy_comparison.md),
+[JSON data](benchmarks/results/scrapy_comparison.json), and
+[CSV data](benchmarks/results/scrapy_comparison.csv).
 
 Install the comparison dependency and reproduce the benchmark with:
 
 ```bash
 python -m pip install -r requirements-benchmark.txt
-python benchmark/benchmark_scrapy.py
+python benchmarks/benchmark_scrapy.py
 ```
 
 ### Python reference benchmark
 
 SpiderOxide also includes the original Python reference implementation used to verify the native
 algorithm in isolation. Its full results are available in the
-[reference report](results/report.md), [JSON data](results/results.json), and
-[CSV data](results/results.csv).
+[reference report](benchmarks/results/report.md),
+[JSON data](benchmarks/results/results.json), and
+[CSV data](benchmarks/results/results.csv).
 
 Run the Python reference benchmark with:
 
 ```bash
-python benchmark/run_all.py
+python benchmarks/run_all.py
 ```
 
 ## Development
+
+The repository uses a conventional mixed-language source layout:
+
+| Path | Purpose |
+|---|---|
+| `src/spideroxide/` | Installable Python package and public API |
+| `crates/spideroxide-native/` | Private PyO3 extension crate compiled as `spideroxide._native` |
+| `tests/` | Integration and Scrapy-compatibility verification |
+| `benchmarks/` | Performance harnesses and checked-in benchmark evidence |
+| `docs/assets/` | Documentation images and branding |
 
 Format and check the Python code:
 
@@ -935,7 +926,7 @@ python -m ruff check .
 Format and check the Rust crate:
 
 ```bash
-cd rust_impl
+cd crates/spideroxide-native
 cargo fmt
 cargo clippy -r
 ```
@@ -944,28 +935,7 @@ Build the extension and run all validation scripts:
 
 ```bash
 maturin develop -r
-python benchmark/verify_integration.py
-python benchmark/verify_correctness.py
-python benchmark/verify_crawler.py
-python benchmark/verify_crawl_spider.py
-python benchmark/verify_spider_middleware.py
-python benchmark/verify_http_models.py
-python benchmark/verify_cookies.py
-python benchmark/verify_http_cache.py
-python benchmark/verify_extensions.py
-python benchmark/verify_feed_exports.py
-python benchmark/verify_native_downloader.py
-python benchmark/verify_native_engine.py
-python benchmark/verify_scheduler_queues.py
-python benchmark/verify_job_state.py
-python benchmark/verify_selectors.py
-python benchmark/verify_retry.py
-python benchmark/verify_native_policy.py
-python benchmark/verify_depth.py
-python benchmark/verify_native_slots.py
-python benchmark/verify_redirect.py
-python benchmark/verify_proxy.py
-python benchmark/verify_native_robots.py
+python tests/run_all.py
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements.

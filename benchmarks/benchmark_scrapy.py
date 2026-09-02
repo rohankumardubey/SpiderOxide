@@ -29,7 +29,7 @@ from scrapy.statscollectors import MemoryStatsCollector
 from scrapy.utils.request import RequestFingerprinter
 from scrapy.utils.request import fingerprint as scrapy_fingerprint
 
-from benchmark.generate_data import RequestData, generate_requests
+from benchmarks.generate_data import RequestData, generate_requests
 from spideroxide import DupeFilter, Request, Scheduler, fingerprint_request
 
 Factory = Callable[[], Callable[[], object]]
@@ -439,7 +439,7 @@ def main() -> None:
     parser.add_argument("--sizes", nargs="+", type=int, default=[10_000, 100_000])
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--runs", type=int, default=10)
-    parser.add_argument("--output-dir", type=Path, default=ROOT / "results")
+    parser.add_argument("--output-dir", type=Path, default=ROOT / "benchmarks" / "results")
     arguments = parser.parse_args()
     results, sanity = run_benchmarks(arguments.sizes, arguments.warmups, arguments.runs)
     write_results(

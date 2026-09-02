@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from benchmark.generate_data import generate_requests
+from benchmarks.generate_data import generate_requests
 from spideroxide import _rust as rust_impl
 from spideroxide._python import PythonScheduler
 

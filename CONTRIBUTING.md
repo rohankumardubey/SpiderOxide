@@ -23,6 +23,19 @@ maturin develop --release
 
 On Windows PowerShell, activate with `.\.venv\Scripts\Activate.ps1`.
 
+## Repository layout
+
+SpiderOxide uses a source layout that keeps production code, native code, verification, and
+performance evidence separate:
+
+| Path | Purpose |
+|---|---|
+| `src/spideroxide/` | Installable Python package and public API |
+| `crates/spideroxide-native/` | Private Rust extension crate |
+| `tests/` | Integration and compatibility verification |
+| `benchmarks/` | Performance code and checked-in benchmark results |
+| `docs/assets/` | Documentation assets |
+
 ## Required checks
 
 Run these before opening a pull request:
@@ -30,32 +43,10 @@ Run these before opening a pull request:
 ```bash
 python -m ruff format .
 python -m ruff check .
-cargo fmt --manifest-path rust_impl/Cargo.toml -- --check
-cargo clippy --manifest-path rust_impl/Cargo.toml --release -- -D warnings
+cargo fmt --manifest-path crates/spideroxide-native/Cargo.toml -- --check
+cargo clippy --manifest-path crates/spideroxide-native/Cargo.toml --release -- -D warnings
 maturin develop --release
-python benchmark/verify_integration.py
-python benchmark/verify_correctness.py
-python benchmark/verify_crawler.py
-python benchmark/verify_crawl_spider.py
-python benchmark/verify_spider_middleware.py
-python benchmark/verify_http_models.py
-python benchmark/verify_cookies.py
-python benchmark/verify_http_cache.py
-python benchmark/verify_media_pipelines.py
-python benchmark/verify_extensions.py
-python benchmark/verify_remote_feeds.py
-python benchmark/verify_native_downloader.py
-python benchmark/verify_native_engine.py
-python benchmark/verify_scheduler_queues.py
-python benchmark/verify_job_state.py
-python benchmark/verify_selectors.py
-python benchmark/verify_retry.py
-python benchmark/verify_native_policy.py
-python benchmark/verify_depth.py
-python benchmark/verify_native_slots.py
-python benchmark/verify_redirect.py
-python benchmark/verify_proxy.py
-python benchmark/verify_native_robots.py
+python tests/run_all.py
 ```
 
 The release wheel must also contain the public `spideroxide` package without Rust source or build
@@ -81,7 +72,7 @@ replace measured values with estimates.
 For expensive experiments, start with:
 
 ```bash
-python benchmark/run_all.py --sizes 1000 --warmups 1 --runs 2
+python benchmarks/run_all.py --sizes 1000 --warmups 1 --runs 2
 ```
 
 Use the required three warm-ups and ten measured runs for publishable results.

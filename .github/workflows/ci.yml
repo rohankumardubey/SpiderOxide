@@ -48,90 +48,21 @@ jobs:
         run: .venv/bin/python -m ruff check .
 
       - name: Check Rust formatting
-        run: cargo fmt --manifest-path rust_impl/Cargo.toml -- --check
+        run: cargo fmt --manifest-path crates/spideroxide-native/Cargo.toml -- --check
 
       - name: Lint Rust
-        run: cargo clippy --manifest-path rust_impl/Cargo.toml --release -- -D warnings
+        run: cargo clippy --manifest-path crates/spideroxide-native/Cargo.toml --release -- -D warnings
 
       - name: Build editable release extension
         run: .venv/bin/maturin develop --release
 
-      - name: Verify integration facade
-        run: .venv/bin/python benchmark/verify_integration.py
-
-      - name: Verify implementation parity
-        run: .venv/bin/python benchmark/verify_correctness.py
-
-      - name: Verify crawler foundation
-        run: .venv/bin/python benchmark/verify_crawler.py
-
-      - name: Verify CrawlSpider and link extraction
-        run: .venv/bin/python benchmark/verify_crawl_spider.py
-
-      - name: Verify spider middleware
-        run: .venv/bin/python benchmark/verify_spider_middleware.py
-
-      - name: Verify HTTP models
-        run: .venv/bin/python benchmark/verify_http_models.py
-
-      - name: Verify cookies
-        run: .venv/bin/python benchmark/verify_cookies.py
-
-      - name: Verify HTTP cache
-        run: .venv/bin/python benchmark/verify_http_cache.py
-
-      - name: Verify media pipelines
-        run: .venv/bin/python benchmark/verify_media_pipelines.py
-
-      - name: Verify extensions
-        run: .venv/bin/python benchmark/verify_extensions.py
-
-      - name: Verify feed exports
-        run: .venv/bin/python benchmark/verify_feed_exports.py
-
-      - name: Verify remote feeds and postprocessing
-        run: .venv/bin/python benchmark/verify_remote_feeds.py
-
-      - name: Verify native downloader
-        run: .venv/bin/python benchmark/verify_native_downloader.py
-
-      - name: Verify native engine
-        run: .venv/bin/python benchmark/verify_native_engine.py
-
-      - name: Verify scheduler queues
-        run: .venv/bin/python benchmark/verify_scheduler_queues.py
-
-      - name: Verify persistent job state
-        run: .venv/bin/python benchmark/verify_job_state.py
-
-      - name: Verify selectors, items, and loaders
-        run: .venv/bin/python benchmark/verify_selectors.py
-
-      - name: Verify retry policy
-        run: .venv/bin/python benchmark/verify_retry.py
-
-      - name: Verify native policy runtime
-        run: .venv/bin/python benchmark/verify_native_policy.py
-
-      - name: Verify request depth policy
-        run: .venv/bin/python benchmark/verify_depth.py
-
-      - name: Verify native download slots
-        run: .venv/bin/python benchmark/verify_native_slots.py
-
-      - name: Verify redirect middleware
-        run: .venv/bin/python benchmark/verify_redirect.py
-
-      - name: Verify proxy middleware
-        run: .venv/bin/python benchmark/verify_proxy.py
-
-      - name: Verify native robots policy
-        run: .venv/bin/python benchmark/verify_native_robots.py
+      - name: Run integration and compatibility suite
+        run: .venv/bin/python tests/run_all.py
 
       - name: Smoke-test Scrapy comparison
         run: |
           .venv/bin/python -m pip install "Scrapy>=2.17,<3"
-          .venv/bin/python benchmark/benchmark_scrapy.py \
+          .venv/bin/python benchmarks/benchmark_scrapy.py \
             --sizes 100 --warmups 1 --runs 2 --output-dir /tmp/scrapy-comparison
 
       - name: Build release wheel
@@ -149,7 +80,7 @@ jobs:
 
           assert not any("__pycache__" in name for name in names)
           assert not any(name.endswith((".pyc", ".pyo")) for name in names)
-          assert not any(name.startswith("rust_impl/") for name in names)
+          assert not any(name.startswith("crates/") for name in names)
           assert "spideroxide/py.typed" in names
           PY
 

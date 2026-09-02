@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 description = "Native request-processing backend for SpiderOxide"
 license = "MIT"
+repository = "https://github.com/rohankumardubey/SpiderOxide"
 
 [lib]
 name = "_native"
