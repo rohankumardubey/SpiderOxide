@@ -17,9 +17,6 @@ htmlcov/
 /share/
 /pyvenv.cfg
 
-# Rust
-rust_impl/target/
-
 # Build artifacts
 build/
 dist/

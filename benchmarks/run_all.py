@@ -8,7 +8,8 @@ from common import (
     run_cases,
     write_results,
 )
-from verify_correctness import run_correctness
+
+from tests.verify_correctness import run_correctness
 
 
 def main() -> None:
@@ -24,7 +25,7 @@ def main() -> None:
         "all scenarios were impractical for this interactive environment."
     )
     command = (
-        "python benchmark/run_all.py "
+        "python benchmarks/run_all.py "
         f"--sizes {' '.join(str(size) for size in arguments.sizes)} "
         f"--warmups {arguments.warmups} --runs {arguments.runs}"
     )
@@ -49,16 +50,20 @@ def main() -> None:
             ".venv/bin/python -m pip install -r requirements.txt",
             ".venv/bin/python -m ruff format .",
             ".venv/bin/python -m ruff check .",
-            "cargo fmt --manifest-path rust_impl/Cargo.toml -- --check",
-            "cargo clippy --manifest-path rust_impl/Cargo.toml --release -- -D warnings",
+            "cargo fmt --manifest-path crates/spideroxide-native/Cargo.toml -- --check",
+            "cargo clippy --manifest-path crates/spideroxide-native/Cargo.toml "
+            "--release -- -D warnings",
             ".venv/bin/maturin develop --release",
-            ".venv/bin/python benchmark/verify_correctness.py",
+            ".venv/bin/python tests/verify_correctness.py",
             command,
         ],
         "failed_commands": [],
     }
     write_results(payload)
-    print("Wrote results/results.json, results/results.csv, and results/report.md")
+    print(
+        "Wrote benchmarks/results/results.json, benchmarks/results/results.csv, "
+        "and benchmarks/results/report.md"
+    )
 
 
 if __name__ == "__main__":

@@ -30,6 +30,11 @@ dependencies = [
     "parsel>=1.10,<2",
 ]
 
+[project.urls]
+Homepage = "https://github.com/rohankumardubey/SpiderOxide"
+Repository = "https://github.com/rohankumardubey/SpiderOxide"
+Issues = "https://github.com/rohankumardubey/SpiderOxide/issues"
+
 [project.optional-dependencies]
 images = [
     "Pillow>=10,<13",
@@ -53,22 +58,23 @@ benchmark = [
 ]
 
 [tool.maturin]
-manifest-path = "rust_impl/Cargo.toml"
-python-source = "."
+manifest-path = "crates/spideroxide-native/Cargo.toml"
+python-source = "src"
 python-packages = ["spideroxide"]
 module-name = "spideroxide._native"
 include = [
-    { path = "spideroxide/**/*.py", format = ["sdist", "wheel"] },
-    { path = "spideroxide/py.typed", format = ["sdist", "wheel"] },
+    { path = "src/spideroxide/**/*.py", format = ["sdist", "wheel"] },
+    { path = "src/spideroxide/py.typed", format = ["sdist", "wheel"] },
 ]
 exclude = [
-    { path = "rust_impl/Cargo.lock", format = "wheel" },
-    { path = "rust_impl/Cargo.toml", format = "wheel" },
-    { path = "rust_impl/src/**", format = "wheel" },
-    { path = "rust_impl/target/**", format = "wheel" },
-    { path = "spideroxide/**/__pycache__/**", format = "wheel" },
-    { path = "spideroxide/**/*.pyc", format = "wheel" },
-    { path = "spideroxide/**/*.pyo", format = "wheel" },
+    { path = "Cargo.lock", format = "wheel" },
+    { path = "Cargo.toml", format = "wheel" },
+    { path = "crates/spideroxide-native/Cargo.toml", format = "wheel" },
+    { path = "crates/spideroxide-native/src/**", format = "wheel" },
+    { path = "crates/spideroxide-native/target/**", format = "wheel" },
+    { path = "src/spideroxide/**/__pycache__/**", format = "wheel" },
+    { path = "src/spideroxide/**/*.pyc", format = "wheel" },
+    { path = "src/spideroxide/**/*.pyo", format = "wheel" },
 ]
 
 [tool.ruff]
@@ -79,27 +85,5 @@ target-version = "py310"
 select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
-"benchmark/common.py" = ["E402"]
-"benchmark/memory_worker.py" = ["E402"]
-"benchmark/verify_correctness.py" = ["E402"]
-"benchmark/verify_crawler.py" = ["E402"]
-"benchmark/verify_crawl_spider.py" = ["E402"]
-"benchmark/verify_extensions.py" = ["E402"]
-"benchmark/verify_integration.py" = ["E402"]
-"benchmark/verify_native_downloader.py" = ["E402"]
-"benchmark/verify_native_engine.py" = ["E402"]
-"benchmark/verify_scheduler_queues.py" = ["E402"]
-"benchmark/verify_selectors.py" = ["E402"]
-"benchmark/verify_spider_middleware.py" = ["E402"]
-"benchmark/verify_retry.py" = ["E402"]
-"benchmark/verify_native_policy.py" = ["E402"]
-"benchmark/verify_depth.py" = ["E402"]
-"benchmark/verify_proxy.py" = ["E402"]
-"benchmark/verify_feed_exports.py" = ["E402"]
-"benchmark/verify_http_models.py" = ["E402"]
-"benchmark/verify_http_cache.py" = ["E402"]
-"benchmark/verify_media_pipelines.py" = ["E402"]
-"benchmark/verify_remote_feeds.py" = ["E402"]
-"benchmark/verify_cookies.py" = ["E402"]
-"benchmark/verify_job_state.py" = ["E402"]
-"benchmark/benchmark_scrapy.py" = ["E402"]
+"benchmarks/*.py" = ["E402"]
+"tests/*.py" = ["E402"]

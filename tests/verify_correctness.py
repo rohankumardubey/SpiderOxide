@@ -7,10 +7,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from benchmark.generate_data import DEFAULT_SEED, generate_requests, request_fields
-from benchmark.verify_integration import run_integration_checks
+from benchmarks.generate_data import DEFAULT_SEED, generate_requests, request_fields
 from spideroxide import _rust as rust_impl
 from spideroxide._python import PythonDupeFilter, PythonScheduler, fingerprint
+from tests.verify_integration import run_integration_checks
 
 
 def _verify_examples() -> None:

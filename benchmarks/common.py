@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from benchmark.generate_data import RequestData, generate_requests
+from benchmarks.generate_data import RequestData, generate_requests
 from spideroxide import _rust as rust_impl
 from spideroxide._python import (
     PythonDupeFilter,
@@ -331,7 +331,7 @@ def run_cases(
 
 def measure_memory(sizes: Sequence[int]) -> list[dict[str, object]]:
     records: list[dict[str, object]] = []
-    worker = ROOT / "benchmark" / "memory_worker.py"
+    worker = ROOT / "benchmarks" / "memory_worker.py"
     for size in sizes:
         for implementation in ("python", "rust"):
             for mode in ("single", "batch"):
@@ -356,7 +356,7 @@ def measure_memory(sizes: Sequence[int]) -> list[dict[str, object]]:
 
 
 def write_results(payload: dict[str, object]) -> None:
-    output_dir = ROOT / "results"
+    output_dir = ROOT / "benchmarks" / "results"
     output_dir.mkdir(exist_ok=True)
     (output_dir / "results.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     rows = payload["results"]

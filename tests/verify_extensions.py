@@ -155,7 +155,7 @@ async def _verify_lifecycle(engine: str) -> None:
             "EXTENSIONS": {
                 f"{BaseExtension.__module__}.BaseExtension": None,
                 instance: 50,
-                "benchmark.verify_extensions.PathExtension": 75,
+                "tests.verify_extensions.PathExtension": 75,
                 LifecycleExtension: 300,
                 "optional.extensions.Missing": None,
             },
