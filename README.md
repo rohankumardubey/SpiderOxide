@@ -54,6 +54,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
 * Priority-ordered Scrapy-compatible extensions and lifecycle signals
 * Streaming Scrapy-compatible JSON, JSON Lines, CSV, and XML feed exports
+* FTP, S3, and GCS feed storage with gzip, bzip2, and LZMA postprocessing
 * Safe Rust with no unsafe blocks
 
 ## Installation
@@ -480,8 +481,9 @@ extensions run as Python observers through the public signal API.
 ## Feed exports
 
 Configure one or more streaming outputs with Scrapy's `FEEDS` setting. SpiderOxide supports plain
-filesystem paths, `file://` URIs, `pathlib.Path` keys, and `stdout:`. Built-in formats are `json`,
-`jsonlines` with the `jsonl` and `jl` aliases, `csv`, and `xml`.
+filesystem paths, `file://` URIs, `pathlib.Path` keys, `stdout:`, FTP, Amazon S3, and Google Cloud
+Storage. Built-in formats are `json`, `jsonlines` with the `jsonl` and `jl` aliases, `csv`, and
+`xml`.
 
 ```python
 settings = {
@@ -501,6 +503,14 @@ settings = {
             "batch_item_count": 10_000,
             "overwrite": True,
         },
+        "s3://crawler-results/%(name)s/items.jl.gz": {
+            "format": "jsonlines",
+            "overwrite": True,
+            "postprocessing": [
+                "spideroxide.feedpostprocessing.GzipPlugin",
+            ],
+            "gzip_compresslevel": 6,
+        },
     },
 }
 ```
@@ -516,6 +526,20 @@ Filesystem feeds append by default for Scrapy compatibility. Set `overwrite` to 
 crawl should replace the previous output. Export completion is observable through
 `signals.feed_slot_closed` and `signals.feed_exporter_closed`; storage outcomes are recorded under
 `feedexport/success_count/<Storage>` and `feedexport/failed_count/<Storage>`.
+
+Remote feeds use temporary local files and upload them outside the event loop. Configure the
+temporary directory with `FEED_TEMPDIR` and bound simultaneous uploads with
+`FEED_STORAGE_CONCURRENCY`, which defaults to four. FTP credentials may be embedded in the URI, and
+`FEED_STORAGE_FTP_ACTIVE` selects active mode. S3 uses the standard AWS credential chain or the
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ENDPOINT_URL`, and
+`AWS_REGION_NAME` settings. GCS uses application default credentials and `GCS_PROJECT_ID`. Optional
+object ACLs come from `FEED_STORAGE_S3_ACL` and `FEED_STORAGE_GCS_ACL`.
+
+Install S3 support with `pip install "spideroxide[s3]"`, GCS support with
+`pip install "spideroxide[gcs]"`, or both with `pip install "spideroxide[remote-feeds]"`. FTP and
+the built-in postprocessors require no additional dependencies. Add `GzipPlugin`, `Bz2Plugin`, or
+`LZMAPlugin` to a feed's `postprocessing` list and pass the matching `gzip_*`, `bz2_*`, or `lzma_*`
+options to control compression.
 
 Custom formats and destinations can be registered through `FEED_EXPORTERS` and `FEED_STORAGES`.
 The exporter runs as a Python extension because it serializes user-defined item types, while both
@@ -962,10 +986,10 @@ persistent native SQLite HTTP caching supports unconditional reuse and RFC reval
 engine also owns persistent request and duplicate state, configured FIFO and LIFO crawl queues, and
 start-request precedence.
 The native downloader owns authenticated per-proxy connection pools. Local file and image pipelines
-provide persistent freshness checks, checksums, image conversion, and thumbnails. Local and
-standard-output feed exports are available through the built-in feed extension. SpiderOxide does not
-yet include remote media or feed storage, feed postprocessing, built-in operational extensions,
-SOCKS proxy support, or Scrapy command-line compatibility.
+provide persistent freshness checks, checksums, image conversion, and thumbnails. Local, FTP, S3,
+GCS, and standard-output feed exports are available with optional compression postprocessing.
+SpiderOxide does not yet include remote media storage, built-in operational extensions, SOCKS proxy
+support, or Scrapy command-line compatibility.
 
 The benchmark results support further integration work, but production adoption should be based on
 representative crawls that include persistence, callbacks, crawl policies, and concurrency.

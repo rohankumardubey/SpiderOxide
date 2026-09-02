@@ -89,6 +89,9 @@ jobs:
       - name: Verify feed exports
         run: .venv/bin/python benchmark/verify_feed_exports.py
 
+      - name: Verify remote feeds and postprocessing
+        run: .venv/bin/python benchmark/verify_remote_feeds.py
+
       - name: Verify native downloader
         run: .venv/bin/python benchmark/verify_native_downloader.py
 

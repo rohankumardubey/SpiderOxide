@@ -34,6 +34,16 @@ dependencies = [
 images = [
     "Pillow>=10,<13",
 ]
+s3 = [
+    "boto3>=1.35,<2",
+]
+gcs = [
+    "google-cloud-storage>=2.18,<4",
+]
+remote-feeds = [
+    "boto3>=1.35,<2",
+    "google-cloud-storage>=2.18,<4",
+]
 dev = [
     "maturin>=1.7,<2",
     "ruff>=0.9,<1",
@@ -89,6 +99,7 @@ select = ["E", "F", "I", "UP", "B"]
 "benchmark/verify_http_models.py" = ["E402"]
 "benchmark/verify_http_cache.py" = ["E402"]
 "benchmark/verify_media_pipelines.py" = ["E402"]
+"benchmark/verify_remote_feeds.py" = ["E402"]
 "benchmark/verify_cookies.py" = ["E402"]
 "benchmark/verify_job_state.py" = ["E402"]
 "benchmark/benchmark_scrapy.py" = ["E402"]
