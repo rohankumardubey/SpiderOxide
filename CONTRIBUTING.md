@@ -43,6 +43,7 @@ python benchmark/verify_cookies.py
 python benchmark/verify_http_cache.py
 python benchmark/verify_media_pipelines.py
 python benchmark/verify_extensions.py
+python benchmark/verify_remote_feeds.py
 python benchmark/verify_native_downloader.py
 python benchmark/verify_native_engine.py
 python benchmark/verify_scheduler_queues.py
