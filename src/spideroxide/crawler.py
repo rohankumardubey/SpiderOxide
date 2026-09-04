@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from .downloader import Downloader, create_downloader
+from .downloader import Downloader
+from .downloadhandlers import DownloadHandlers
 from .engine import CrawlEngine, CrawlResult, create_engine
 from .extensions import ExtensionManager
 from .settings import Settings
@@ -43,7 +44,8 @@ class Crawler:
         try:
             self.extensions = ExtensionManager.from_crawler(self)
             self.settings.freeze()
-            downloader = downloader or create_downloader(self.settings)
+            downloader = downloader or DownloadHandlers.from_crawler(self)
+            self.downloader = downloader
             self.engine = create_engine(self, self.spider, downloader)
         except BaseException:
             close = getattr(downloader, "close", None) if downloader is not None else None

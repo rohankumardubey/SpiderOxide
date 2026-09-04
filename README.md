@@ -51,6 +51,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * Scrapy-compatible file and image pipelines with native persistent storage
 * Streaming HTTP downloads with repeated header support
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
+* Scheme-aware download handlers for HTTP, HTTPS, data URIs, local files, FTP, and S3
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
 * Priority-ordered Scrapy-compatible extensions and lifecycle signals
 * Streaming Scrapy-compatible JSON, JSON Lines, CSV, and XML feed exports
@@ -577,6 +578,60 @@ The downloader selects response subclasses from `Content-Type`, URL extensions, 
 body inspection. Built-in request subclasses retain their type and configuration when restored from
 `JOBDIR`.
 
+## Download handlers
+
+SpiderOxide dispatches downloads by URL scheme through `DownloadHandlers`. HTTP and HTTPS use the
+selected Python or Rust downloader backend. The built-in handlers also support RFC 2397 `data:`
+URLs, local `file:` URLs, FTP downloads, and anonymous or signed S3 downloads.
+
+Customize handlers with `DOWNLOAD_HANDLERS`. Entries override `DOWNLOAD_HANDLERS_BASE`, and a
+`None` value disables a scheme:
+
+```python
+from spideroxide import TextResponse
+
+
+class ApiDownloadHandler:
+    lazy = True
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls()
+
+    async def download_request(self, request):
+        return TextResponse(request.url, body=b"custom response", request=request)
+
+    async def close(self):
+        pass
+
+
+settings = {
+    "DOWNLOAD_HANDLERS": {
+        "api": ApiDownloadHandler,
+        "file": None,
+    }
+}
+```
+
+Handlers may be classes or import paths. Non-lazy handlers are initialized when a crawl starts;
+lazy handlers are initialized on their first request. Initialized handlers are closed when the
+crawl ends. Requests for disabled or unknown schemes raise `NotSupported` through the normal
+downloader middleware exception path.
+
+FTP credentials default to `FTP_USER` and `FTP_PASSWORD` and can be overridden per request with
+`ftp_user`, `ftp_password`, and `ftp_passive` metadata. Set `ftp_local_filename` to stream the
+download to a local file. S3 downloads require the `s3` optional dependency:
+
+```bash
+python -m pip install "spideroxide[s3]"
+```
+
+When AWS credentials are unset, S3 requests are anonymous. `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` enable signed requests.
+
+`file:` and `data:` URLs can expose local or embedded content. Disable either handler when crawl
+inputs are untrusted and those schemes are not required.
+
 ## Selectors
 
 `TextResponse` provides the familiar Scrapy selector API through Parsel, the same selector library
@@ -802,6 +857,7 @@ The validation suite compares:
 * explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
 * extension priorities, overrides, factories, opt-outs, async hooks, lifecycle order, and parity
 * feed formats, fields, encodings, templates, batches, filters, storage, signals, and engine parity
+* handler overrides, disabling, lifecycle, data URIs, local files, FTP, S3, and engine parity
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
 parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
@@ -955,9 +1011,11 @@ Scrapy-compatible handling, while
 persistent native SQLite HTTP caching supports unconditional reuse and RFC revalidation. The native
 engine also owns persistent request and duplicate state, configured FIFO and LIFO crawl queues, and
 start-request precedence.
-The native downloader owns authenticated per-proxy connection pools. Local file and image pipelines
-provide persistent freshness checks, checksums, image conversion, and thumbnails. Local, FTP, S3,
-GCS, and standard-output feed exports are available with optional compression postprocessing.
+The native downloader owns authenticated per-proxy connection pools. Scheme-aware download handlers
+provide HTTP, HTTPS, data URI, local file, FTP, S3, and custom protocol dispatch. Local file and
+image pipelines provide persistent freshness checks, checksums, image conversion, and thumbnails.
+Local, FTP, S3, GCS, and standard-output feed exports are available with optional compression
+postprocessing.
 SpiderOxide does not yet include remote media storage, built-in operational extensions, SOCKS proxy
 support, or Scrapy command-line compatibility.
 

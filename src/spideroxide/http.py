@@ -42,17 +42,35 @@ def _prepare_url(url: str, encoding: str) -> str:
         raise TypeError(f"Request url must be str, got {type(url).__name__}")
     url = safe_url_string(url, encoding=encoding)
     parts = urlsplit(url)
-    if parts.scheme.lower() not in {"http", "https"} or parts.hostname is None:
-        raise ValueError(f"request URL must be an absolute HTTP or HTTPS URL: {url!r}")
+    if not parts.scheme:
+        raise ValueError(f"request URL must include a scheme: {url!r}")
+    if parts.scheme.lower() in {"http", "https"} and parts.hostname is None:
+        raise ValueError(f"HTTP request URL must include a hostname: {url!r}")
     return url
+
+
+def _urljoin(base: str, url: str) -> str:
+    parsed_base = urlsplit(base)
+    parsed_url = urlsplit(url)
+    if parsed_url.scheme or not parsed_base.scheme or not parsed_base.netloc:
+        return urljoin(base, url)
+    placeholder = urlunsplit(
+        ("http", parsed_base.netloc, parsed_base.path, parsed_base.query, parsed_base.fragment)
+    )
+    joined = urlsplit(urljoin(placeholder, url))
+    return urlunsplit(
+        (parsed_base.scheme, joined.netloc, joined.path, joined.query, joined.fragment)
+    )
 
 
 def _validate_url(url: str) -> None:
     if not isinstance(url, str):
         raise TypeError(f"Response url must be str, got {type(url).__name__}")
     parts = urlsplit(url)
-    if parts.scheme.lower() not in {"http", "https"} or parts.hostname is None:
-        raise ValueError(f"response URL must be an absolute HTTP or HTTPS URL: {url!r}")
+    if not parts.scheme:
+        raise ValueError(f"response URL must include a scheme: {url!r}")
+    if parts.scheme.lower() in {"http", "https"} and parts.hostname is None:
+        raise ValueError(f"HTTP response URL must include a hostname: {url!r}")
 
 
 def _body_bytes(body: bytes | str | None, encoding: str, *, text: bool = False) -> bytes:
@@ -412,7 +430,7 @@ class Request:
         cb_kwargs: Mapping[str, Any] | None = None,
     ) -> Request:
         return Request(
-            url=urljoin(self.url, url),
+            url=_urljoin(self.url, url),
             callback=callback,
             method=method,
             headers=headers or Headers(),
@@ -500,7 +518,7 @@ class Response:
         return self.replace()
 
     def urljoin(self, url: str) -> str:
-        return urljoin(self.url, url)
+        return _urljoin(self.url, url)
 
     def follow(
         self,
@@ -658,7 +676,7 @@ class TextResponse(Response):
         return self._cached_base_url
 
     def urljoin(self, url: str) -> str:
-        return urljoin(self._selector_base_url(self._selector_type()), url)
+        return _urljoin(self._selector_base_url(self._selector_type()), url)
 
     def follow(self, url: str | Selector, **kwargs: object) -> Request:
         if isinstance(url, Selector):

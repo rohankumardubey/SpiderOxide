@@ -101,7 +101,12 @@ class CookiesMiddleware:
         return middleware
 
     def process_request(self, request: Request, spider: Spider) -> None:
-        if request.meta.get("dont_merge_cookies", False):
+        if request.meta.get("dont_merge_cookies", False) or urlsplit(
+            request.url
+        ).scheme.lower() not in {
+            "http",
+            "https",
+        }:
             return
 
         jar = self.jars[request.meta.get("cookiejar")]
@@ -123,7 +128,12 @@ class CookiesMiddleware:
         response: Response,
         spider: Spider,
     ) -> Response:
-        if request.meta.get("dont_merge_cookies", False):
+        if request.meta.get("dont_merge_cookies", False) or urlsplit(
+            request.url
+        ).scheme.lower() not in {
+            "http",
+            "https",
+        }:
             return response
 
         jar = self.jars[request.meta.get("cookiejar")]

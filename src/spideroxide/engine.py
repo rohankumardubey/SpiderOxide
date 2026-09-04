@@ -5,6 +5,7 @@ import os
 import warnings
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from . import signals
 from ._scheduler import EngineScheduler, SchedulerQueueConfig
@@ -656,6 +657,8 @@ class NativeCrawlEngine(CrawlEngine):
         native_download_slots = self.native_download_slots
         if native_download_slots is None:
             raise RuntimeError("native download slots are not initialized")
+        if urlsplit(request.url).hostname is None and request.meta.get("download_slot") is None:
+            return await self.downloader_middleware.download(request, self.downloader.fetch)
         return await self.downloader_middleware.download(
             request,
             lambda current: native_download_slots.download(

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from urllib.parse import SplitResult, urljoin, urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from .exceptions import IgnoreRequest, NotConfigured
-from .http import Request, Response
+from .http import Request, Response, _urljoin
 from .settings import Settings
 
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
@@ -42,13 +42,13 @@ class RedirectMiddleware:
             return response
 
         location = response.headers["Location"].decode("latin-1").strip()
-        redirected_url = urljoin(request.url, location)
+        redirected_url = _urljoin(request.url, location)
         source = urlsplit(request.url)
         redirected = urlsplit(redirected_url)
-        if redirected.scheme not in {"http", "https"}:
+        if redirected.scheme not in {"http", "https", source.scheme}:
             return response
         if not redirected.fragment and source.fragment:
-            redirected_url = urljoin(redirected_url, f"#{source.fragment}")
+            redirected_url = _urljoin(redirected_url, f"#{source.fragment}")
             redirected = urlsplit(redirected_url)
 
         redirect_times = int(request.meta.get("redirect_times", 0)) + 1

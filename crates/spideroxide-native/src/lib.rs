@@ -33,19 +33,57 @@ pyo3::create_exception!(_native, NativeDownloadError, pyo3::exceptions::PyExcept
 
 type RequestTuple = (String, String, Vec<u8>, i64);
 
+fn quote_hostless_path(path: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut quoted = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || b"/:@-._~!$&'()*+,;=%".contains(&byte) {
+            quoted.push(char::from(byte));
+        } else {
+            quoted.push('%');
+            quoted.push(char::from(HEX[usize::from(byte >> 4)]));
+            quoted.push(char::from(HEX[usize::from(byte & 0x0f)]));
+        }
+    }
+    quoted
+}
+
 fn canonicalize_url(url: &str) -> PyResult<String> {
     let mut parsed =
         Url::parse(url).map_err(|error| PyValueError::new_err(format!("invalid URL: {error}")))?;
-    let scheme = parsed.scheme().to_lowercase();
-    if parsed.host_str().is_none() {
-        return Err(PyValueError::new_err(
-            "URL must include a scheme and hostname",
-        ));
+    let scheme = parsed.scheme().to_owned();
+    let has_host = parsed.host_str().is_some();
+    if !has_host {
+        let scheme_end = url
+            .find(':')
+            .ok_or_else(|| PyValueError::new_err("URL must include a scheme"))?;
+        let without_fragment = &url[..url.find('#').unwrap_or(url.len())];
+        let remainder = &without_fragment[scheme_end + 1..];
+        let (path, query) = remainder
+            .split_once('?')
+            .map_or((remainder, None), |(path, query)| (path, Some(query)));
+        let mut pairs: Vec<(String, String)> = query
+            .map(|value| {
+                form_urlencoded::parse(value.as_bytes())
+                    .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        pairs.sort();
+        let canonical_query = if pairs.is_empty() {
+            None
+        } else {
+            let mut serializer = form_urlencoded::Serializer::new(String::new());
+            serializer.extend_pairs(pairs);
+            Some(serializer.finish())
+        };
+        let mut canonical = format!("{}:{}", scheme.to_lowercase(), quote_hostless_path(path));
+        if let Some(query) = canonical_query {
+            canonical.push('?');
+            canonical.push_str(&query);
+        }
+        return Ok(canonical);
     }
-
-    parsed
-        .set_scheme(&scheme)
-        .map_err(|_| PyValueError::new_err("invalid URL scheme"))?;
     parsed.set_fragment(None);
     if (scheme == "http" && parsed.port() == Some(80))
         || (scheme == "https" && parsed.port() == Some(443))
@@ -54,7 +92,7 @@ fn canonicalize_url(url: &str) -> PyResult<String> {
             .set_port(None)
             .map_err(|_| PyValueError::new_err("unable to normalize URL port"))?;
     }
-    if parsed.path().is_empty() {
+    if has_host && parsed.path().is_empty() {
         parsed.set_path("/");
     }
 
