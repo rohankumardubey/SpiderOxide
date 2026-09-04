@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 from urllib.parse import urlsplit
@@ -76,7 +75,6 @@ class NativeDownloadSlots:
         )
         request.meta["download_slot"] = key
         request.meta.pop("download_latency", None)
-        started = asyncio.get_running_loop().time()
         latency: float | None = None
         status: int | None = None
         try:
@@ -84,9 +82,6 @@ class NativeDownloadSlots:
             reported_latency = request.meta.get("download_latency")
             if reported_latency is not None:
                 latency = float(reported_latency)
-            elif not self._autothrottle_enabled:
-                latency = asyncio.get_running_loop().time() - started
-                request.meta["download_latency"] = latency
             status = response.status
             return response
         finally:

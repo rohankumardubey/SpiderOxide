@@ -18,6 +18,10 @@ class DownloadError(SpiderOxideError):
     """Raised when a request cannot be downloaded."""
 
 
+class NotSupported(SpiderOxideError):
+    """Raised when no download handler supports a request URL scheme."""
+
+
 class CloseSpider(SpiderOxideError):
     """Request an orderly spider shutdown."""
 

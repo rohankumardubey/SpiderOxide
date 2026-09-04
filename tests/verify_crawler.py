@@ -168,7 +168,8 @@ def _verify_models() -> None:
     assert response.json() == {"ok": True}
     assert response.meta["depth"] == 1
     assert response.follow("/child").url == "https://example.test/child"
-    for invalid_url in ("https:///missing", "mailto:test@example.test", "/relative"):
+    assert Request("mailto:test@example.test").url == "mailto:test@example.test"
+    for invalid_url in ("https:///missing", "/relative"):
         try:
             Request(invalid_url)
         except ValueError:

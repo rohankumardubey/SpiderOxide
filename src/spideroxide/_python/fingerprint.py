@@ -12,8 +12,15 @@ def canonicalize_url(url: str) -> str:
     parts = urlsplit(url)
     scheme = parts.scheme.lower()
     hostname = parts.hostname
-    if not scheme or hostname is None:
-        raise ValueError(f"URL must include a scheme and hostname: {url!r}")
+    if not scheme:
+        raise ValueError(f"URL must include a scheme: {url!r}")
+
+    query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    query_pairs.sort()
+    query = urlencode(query_pairs)
+    if hostname is None:
+        path = quote(parts.path, safe="/:@-._~!$&'()*+,;=%")
+        return urlunsplit((scheme, parts.netloc, path, query, ""))
 
     host = hostname.encode("idna").decode("ascii").lower()
     if ":" in host:
@@ -36,9 +43,6 @@ def canonicalize_url(url: str) -> str:
             userinfo += f":{parts.password}"
         userinfo += "@"
 
-    query_pairs = parse_qsl(parts.query, keep_blank_values=True)
-    query_pairs.sort()
-    query = urlencode(query_pairs)
     path = quote(parts.path or "/", safe="/:@-._~!$&'()*+,;=%")
     return urlunsplit((scheme, userinfo + host, path, query, ""))
 

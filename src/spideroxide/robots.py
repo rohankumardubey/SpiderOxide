@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from .backend import BackendUnavailableError
 from .exceptions import IgnoreRequest, NotConfigured
@@ -46,6 +47,8 @@ class RobotsTxtMiddleware:
         return cls(crawler)
 
     async def process_request(self, request: Request, spider: Spider) -> None:
+        if urlsplit(request.url).scheme.lower() not in {"http", "https"}:
+            return None
         if request.meta.get("dont_obey_robotstxt"):
             if not request.meta.get("_robotstxt_request"):
                 self.runtime.record_bypass()

@@ -14,7 +14,9 @@ if str(ROOT) not in sys.path:
 from spideroxide import (
     Crawler,
     DownloadError,
+    DownloadHandlers,
     Headers,
+    HTTPDownloadHandler,
     NativeCrawlEngine,
     Request,
     RustDownloader,
@@ -252,7 +254,10 @@ async def _verify() -> None:
         assert result.stats["redirect/reason_count/302"] == 1
         assert result.stats["downloader/slot/acquired"] == 2
         assert isinstance(crawler.engine, NativeCrawlEngine)
-        assert isinstance(crawler.engine.downloader, RustDownloader)
+        assert isinstance(crawler.engine.downloader, DownloadHandlers)
+        http_handler = crawler.engine.downloader._handlers["http"]
+        assert isinstance(http_handler, HTTPDownloadHandler)
+        assert isinstance(http_handler.downloader, RustDownloader)
     finally:
         server.close()
         await server.wait_closed()

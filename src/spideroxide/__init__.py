@@ -20,6 +20,16 @@ from .crawl import CrawlSpider, Rule
 from .crawler import Crawler, CrawlerRunner
 from .depth import DepthMiddleware
 from .downloader import Downloader, HttpxDownloader, RustDownloader
+from .downloadhandlers import (
+    BaseDownloadHandler,
+    DataURIDownloadHandler,
+    DownloadHandler,
+    DownloadHandlers,
+    FileDownloadHandler,
+    FTPDownloadHandler,
+    HTTPDownloadHandler,
+    S3DownloadHandler,
+)
 from .engine import CrawlResult, NativeCrawlEngine
 from .exceptions import (
     CloseSpider,
@@ -27,6 +37,7 @@ from .exceptions import (
     DropItem,
     IgnoreRequest,
     NotConfigured,
+    NotSupported,
     SpiderOxideError,
 )
 from .extensions import ExtensionManager
@@ -104,6 +115,7 @@ __all__ = [
     "BACKEND_ENV_VAR",
     "BackendChoice",
     "BackendUnavailableError",
+    "BaseDownloadHandler",
     "BaseItemExporter",
     "BlockingFeedStorage",
     "Bz2Plugin",
@@ -116,7 +128,10 @@ __all__ = [
     "CrawlResult",
     "CsvItemExporter",
     "DownloadError",
+    "DownloadHandler",
+    "DownloadHandlers",
     "Downloader",
+    "DataURIDownloadHandler",
     "DummyPolicy",
     "DepthMiddleware",
     "DropItem",
@@ -128,17 +143,20 @@ __all__ = [
     "FileException",
     "FingerprintRequest",
     "FileFeedStorage",
+    "FileDownloadHandler",
     "FileInfo",
     "FilesPipeline",
     "FSFilesStore",
     "FormRequest",
     "FTPFeedStorage",
+    "FTPDownloadHandler",
     "GCSFeedStorage",
     "GzipPlugin",
     "Headers",
     "HtmlResponse",
     "IgnoreRequest",
     "HttpxDownloader",
+    "HTTPDownloadHandler",
     "HttpProxyMiddleware",
     "HttpCacheMiddleware",
     "ImageException",
@@ -159,6 +177,7 @@ __all__ = [
     "MapCompose",
     "MediaPipeline",
     "NotConfigured",
+    "NotSupported",
     "NativeCrawlEngine",
     "NativeHttpCacheStorage",
     "PriorityRequest",
@@ -170,6 +189,7 @@ __all__ = [
     "RetryMiddleware",
     "Rule",
     "S3FeedStorage",
+    "S3DownloadHandler",
     "RustDownloader",
     "ScheduledRequest",
     "SelectJmes",
