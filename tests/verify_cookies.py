@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 from contextlib import suppress
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -241,6 +242,20 @@ def _verify_native_jar() -> None:
     assert len(jar) == 5
     jar.clear()
     assert len(jar) == 0
+
+    thread_errors: list[BaseException] = []
+
+    def use_on_worker() -> None:
+        try:
+            assert jar.add_cookie("https://thread.example/path", "worker=yes")
+            assert jar.cookie_header("https://thread.example/path") == "worker=yes"
+        except BaseException as error:
+            thread_errors.append(error)
+
+    worker = threading.Thread(target=use_on_worker)
+    worker.start()
+    worker.join()
+    assert not thread_errors
 
 
 def _verify_explicit_secure_default() -> None:

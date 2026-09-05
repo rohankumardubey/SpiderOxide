@@ -23,7 +23,7 @@ fn is_public_suffix(domain: &str) -> bool {
     psl::suffix(domain.as_bytes()).is_some_and(|suffix| suffix.is_known() && suffix == domain)
 }
 
-#[pyclass(module = "spideroxide._native", unsendable)]
+#[pyclass(module = "spideroxide._native")]
 #[derive(Default)]
 pub(crate) struct NativeCookieJar {
     store: CookieStore,
