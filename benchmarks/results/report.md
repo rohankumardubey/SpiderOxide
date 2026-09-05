@@ -1,4 +1,4 @@
-# SpiderOxide benchmark report
+# Python versus Rust benchmark report
 
 ## Environment
 
@@ -6,8 +6,8 @@
 |---|---|
 | Python Version | 3.14.6 |
 | Python Implementation | CPython |
-| Rust Version | rustc 1.97.1 (8bab26f4f 2026-07-14) |
-| Operating System | macOS-26.5.2-arm64-arm-64bit-Mach-O |
+| Rust Version | rustc 1.98.1 (48a229cea 2026-09-01) |
+| Operating System | macOS-26.6.2-arm64-arm-64bit-Mach-O |
 | Architecture | arm64 |
 | Logical Cpu Count | 12 |
 | Rust Build | release |
@@ -27,26 +27,36 @@ Passed: **True**; 10,000 deterministic requests checked byte-for-byte and in sch
 
 | Test | Size | Python median | Rust median | Speedup |
 |---|---:|---:|---:|---:|
-| fingerprint_single | 10,000 | 81.420 ms | 10.985 ms | 7.41x |
-| fingerprint_batch | 10,000 | 82.748 ms | 11.341 ms | 7.30x |
-| dupefilter_single | 10,000 | 82.875 ms | 11.224 ms | 7.38x |
-| dupefilter_batch | 10,000 | 83.944 ms | 11.670 ms | 7.19x |
-| scheduler_insert_single | 10,000 | 87.388 ms | 12.522 ms | 6.98x |
-| scheduler_insert_batch | 10,000 | 89.143 ms | 11.815 ms | 7.54x |
-| scheduler_remove_single | 10,000 | 2.762 ms | 0.919 ms | 3.01x |
-| scheduler_remove_batch | 10,000 | 2.417 ms | 0.503 ms | 4.81x |
-| end_to_end_single | 10,000 | 93.570 ms | 13.691 ms | 6.83x |
-| end_to_end_batch | 10,000 | 92.376 ms | 12.022 ms | 7.68x |
-| fingerprint_single | 100,000 | 848.131 ms | 126.551 ms | 6.70x |
-| fingerprint_batch | 100,000 | 858.518 ms | 129.497 ms | 6.63x |
-| dupefilter_single | 100,000 | 865.680 ms | 131.508 ms | 6.58x |
-| dupefilter_batch | 100,000 | 875.077 ms | 134.390 ms | 6.51x |
-| scheduler_insert_single | 100,000 | 918.117 ms | 148.586 ms | 6.18x |
-| scheduler_insert_batch | 100,000 | 924.922 ms | 136.651 ms | 6.77x |
-| scheduler_remove_single | 100,000 | 57.142 ms | 17.560 ms | 3.25x |
-| scheduler_remove_batch | 100,000 | 46.376 ms | 8.911 ms | 5.20x |
-| end_to_end_single | 100,000 | 987.814 ms | 166.552 ms | 5.93x |
-| end_to_end_batch | 100,000 | 979.383 ms | 147.051 ms | 6.66x |
+| fingerprint_single | 10,000 | 88.861 ms | 11.422 ms | 7.78x |
+| fingerprint_batch | 10,000 | 91.086 ms | 12.992 ms | 7.01x |
+| dupefilter_single | 10,000 | 88.729 ms | 11.817 ms | 7.51x |
+| dupefilter_batch | 10,000 | 90.006 ms | 13.065 ms | 6.89x |
+| scheduler_insert_single | 10,000 | 95.302 ms | 13.111 ms | 7.27x |
+| scheduler_insert_batch | 10,000 | 95.328 ms | 11.752 ms | 8.11x |
+| scheduler_remove_single | 10,000 | 3.265 ms | 1.032 ms | 3.16x |
+| scheduler_remove_batch | 10,000 | 2.461 ms | 0.606 ms | 4.06x |
+| end_to_end_single | 10,000 | 99.457 ms | 14.188 ms | 7.01x |
+| end_to_end_batch | 10,000 | 98.977 ms | 12.350 ms | 8.01x |
+| fingerprint_single | 100,000 | 878.954 ms | 129.256 ms | 6.80x |
+| fingerprint_batch | 100,000 | 926.323 ms | 155.298 ms | 5.96x |
+| dupefilter_single | 100,000 | 929.473 ms | 136.749 ms | 6.80x |
+| dupefilter_batch | 100,000 | 921.467 ms | 153.586 ms | 6.00x |
+| scheduler_insert_single | 100,000 | 950.682 ms | 146.310 ms | 6.50x |
+| scheduler_insert_batch | 100,000 | 965.086 ms | 130.538 ms | 7.39x |
+| scheduler_remove_single | 100,000 | 52.171 ms | 17.144 ms | 3.04x |
+| scheduler_remove_batch | 100,000 | 41.105 ms | 10.202 ms | 4.03x |
+| end_to_end_single | 100,000 | 1028.733 ms | 163.368 ms | 6.30x |
+| end_to_end_batch | 100,000 | 1007.856 ms | 149.713 ms | 6.73x |
+| fingerprint_single | 1,000,000 | 8839.833 ms | 1345.579 ms | 6.57x |
+| fingerprint_batch | 1,000,000 | 8863.580 ms | 1630.382 ms | 5.44x |
+| dupefilter_single | 1,000,000 | 9150.947 ms | 1428.898 ms | 6.40x |
+| dupefilter_batch | 1,000,000 | 8890.739 ms | 1653.340 ms | 5.38x |
+| scheduler_insert_single | 1,000,000 | 10351.096 ms | 1552.534 ms | 6.67x |
+| scheduler_insert_batch | 1,000,000 | 10097.284 ms | 1412.311 ms | 7.15x |
+| scheduler_remove_single | 1,000,000 | 1411.942 ms | 462.049 ms | 3.06x |
+| scheduler_remove_batch | 1,000,000 | 1232.215 ms | 293.359 ms | 4.20x |
+| end_to_end_single | 1,000,000 | 11877.413 ms | 2016.847 ms | 5.89x |
+| end_to_end_batch | 1,000,000 | 12396.837 ms | 1746.734 ms | 7.10x |
 
 Full mean, minimum, maximum, standard deviation, throughput, and per-request values are in `results.json` and `results.csv`.
 
@@ -54,28 +64,32 @@ Full mean, minimum, maximum, standard deviation, throughput, and per-request val
 
 | Implementation | Mode | Size | Peak process memory |
 |---|---|---:|---:|
-| python | single | 10,000 | 29.62 MiB |
-| python | batch | 10,000 | 29.75 MiB |
-| rust | single | 10,000 | 29.48 MiB |
-| rust | batch | 10,000 | 31.12 MiB |
-| python | single | 100,000 | 69.94 MiB |
-| python | batch | 100,000 | 71.84 MiB |
-| rust | single | 100,000 | 81.89 MiB |
-| rust | batch | 100,000 | 99.88 MiB |
+| python | single | 10,000 | 66.56 MiB |
+| python | batch | 10,000 | 66.73 MiB |
+| rust | single | 10,000 | 66.28 MiB |
+| rust | batch | 10,000 | 68.92 MiB |
+| python | single | 100,000 | 107.83 MiB |
+| python | batch | 100,000 | 109.25 MiB |
+| rust | single | 100,000 | 118.95 MiB |
+| rust | batch | 100,000 | 137.95 MiB |
+| python | single | 1,000,000 | 553.55 MiB |
+| python | batch | 1,000,000 | 556.36 MiB |
+| rust | single | 1,000,000 | 599.47 MiB |
+| rust | batch | 1,000,000 | 783.47 MiB |
 
 Memory is the process high-water mark from a fresh subprocess and includes the interpreter, extension, and generated dataset. It is not an allocator-only measurement.
 
 ## Interpretation
 
-Fingerprint PyO3 overhead comparison (10,000: single 7.41x versus batch 7.30x; 100,000: single 6.70x versus batch 6.63x). Mean fingerprint-single speedup was 7.06x. Rust fingerprint batching was 3.2% slower at 10,000 and 2.3% slower at 100,000 than Rust single calls; bulk tuple conversion and output-list materialization outweighed the removed calls in this API shape.
+Fingerprint PyO3 overhead comparison (10,000: single 7.78x versus batch 7.01x; 100,000: single 6.80x versus batch 5.96x; 1,000,000: single 6.57x versus batch 5.44x). Mean fingerprint-single speedup was 7.05x. Rust fingerprint batching changed median time by 10,000: +13.7%, 100,000: +20.1%, 1,000,000: +21.2% relative to Rust single calls; bulk tuple conversion and output-list materialization outweighed the removed calls in this API shape.
 
-Mean end-to-end batch speedup was 7.17x. The principal Python costs are URL parsing/canonicalization, hashing, and heap operations; Rust batch execution keeps those loops native.
+Mean end-to-end batch speedup was 7.28x. The principal Python costs are URL parsing/canonicalization, hashing, and heap operations; Rust batch execution keeps those loops native.
 
 ## Limitations
 
 - This is a synthetic, in-memory workload and excludes Scrapy integration, persistence, network I/O, callbacks, and concurrency.
 - Canonicalization accepts absolute hierarchical URLs. It does not attempt Scrapy's full escaping behavior, internationalized-path policy, semicolon-parameter handling, or scheme-specific normalization.
-- Executed sizes: 10,000, 100,000. The 1,000,000-request suite was not executed because its 10 measured runs across all scenarios were impractical for this interactive environment.
+- Executed sizes: 10,000, 100,000, 1,000,000. All specified dataset sizes were executed.
 - Peak RSS is a subprocess high-water mark, so small differences include startup noise.
 
 ## Recommendation
@@ -88,10 +102,10 @@ The synthetic results justify a Scrapy-level Rust integration experiment, but no
 python3 -m venv .venv
 ```
 ```text
-.venv/bin/python -m pip install --quiet --upgrade pip
+.venv/bin/python -m pip install --upgrade pip
 ```
 ```text
-.venv/bin/python -m pip install --quiet -r requirements.txt
+.venv/bin/python -m pip install -r requirements.txt
 ```
 ```text
 .venv/bin/python -m ruff format .
@@ -100,27 +114,21 @@ python3 -m venv .venv
 .venv/bin/python -m ruff check .
 ```
 ```text
-cargo fmt --manifest-path rust_impl/Cargo.toml -- --check
+cargo fmt --manifest-path crates/spideroxide-native/Cargo.toml -- --check
 ```
 ```text
-cargo clippy --manifest-path rust_impl/Cargo.toml --release -- -D warnings
+cargo clippy --manifest-path crates/spideroxide-native/Cargo.toml --release -- -D warnings
 ```
 ```text
 .venv/bin/maturin develop --release
 ```
 ```text
-.venv/bin/python benchmark/verify_correctness.py
+.venv/bin/python tests/verify_correctness.py
 ```
 ```text
-.venv/bin/python benchmark/run_all.py --sizes 100 --warmups 1 --runs 2
-```
-```text
-.venv/bin/python benchmark/run_all.py --sizes 10000 100000 --warmups 3 --runs 10
+python benchmarks/run_all.py --sizes 10000 100000 1000000 --warmups 3 --runs 10
 ```
 
 ## Failed commands and resolutions
 
-- `cargo fmt --manifest-path rust_impl/Cargo.toml -- --check`: Applied `cargo fmt`, then the check passed.
-- `cargo clippy --manifest-path rust_impl/Cargo.toml --release -- -D warnings`: Changed PyO3 method defaults to explicitly extracted optional values; Clippy then passed.
-- `.venv/bin/maturin develop --release && .venv/bin/python benchmark/verify_correctness.py`: The build succeeded; aligned Python Unicode-path percent encoding with Rust and reran validation.
-- `.venv/bin/python benchmark/verify_correctness.py`: Preserved URL fragments while shuffling duplicate query parameters; all checks then passed.
+None.

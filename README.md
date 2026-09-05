@@ -15,16 +15,31 @@
   </a>
 </p>
 
-SpiderOxide is an experimental Python web crawling framework with optional Rust acceleration. It
-provides an asynchronous crawl engine, request and response models, middleware, item pipelines,
-signals, settings, statistics, duplicate filtering, and priority scheduling. The native
-request-processing backend is exposed to Python with PyO3.
+SpiderOxide is an experimental, Rust-accelerated web crawling framework with a familiar Python API.
+It combines Python spiders, callbacks, middleware, and pipelines with native scheduling,
+fingerprinting, persistence, policy, and networking components exposed through PyO3.
 
-The project was created to find out whether these crawler hot paths benefit from a native
-implementation. Both backends follow the same behavioral contract and are checked against the
-same deterministic data before performance is measured.
+The project explores how much of a production crawler can move into safe Rust without giving up
+Python extensibility. Its Python and Rust backends follow the same behavioral contract and are
+checked against deterministic workloads before performance is measured.
 
-SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
+> [!IMPORTANT]
+> SpiderOxide is under active development. It provides broad Scrapy-style functionality, but it is
+> not yet a drop-in replacement for Scrapy. Evaluate it with representative crawls before using it
+> in production.
+
+SpiderOxide is an independent project inspired by Scrapy. It does not modify, wrap, or replace
+Scrapy.
+
+## Why SpiderOxide?
+
+| Goal | Approach |
+|---|---|
+| Familiar crawler development | Python spiders, callbacks, requests, responses, middleware, pipelines, and settings |
+| Fast request processing | Rust fingerprinting, duplicate filtering, scheduling, policies, persistence, and HTTP transport |
+| Observable compatibility | Shared deterministic verification across Python and Rust engines |
+| Safe native code | Rust implementation with no `unsafe` blocks |
+| Incremental adoption | Explicit `python`, `rust`, and `auto` backend selection during development |
 
 ## Features
 
@@ -58,7 +73,7 @@ SpiderOxide is inspired by Scrapy, but it does not modify or replace Scrapy.
 * FTP, S3, and GCS feed storage with gzip, bzip2, and LZMA postprocessing
 * Safe Rust with no unsafe blocks
 
-## Installation
+## Quick start
 
 SpiderOxide requires Python 3.10 or newer, stable Rust, and a native build toolchain.
 
@@ -67,8 +82,9 @@ From a source checkout:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
-maturin develop -r
+python -m maturin develop --release
 ```
 
 On Windows PowerShell, activate the environment with:
@@ -182,6 +198,8 @@ Set `FILES_URLS_FIELD`, `FILES_RESULT_FIELD`, `FILES_EXPIRES`, `IMAGES_URLS_FIEL
 `MEDIA_ALLOW_REDIRECTS` when media endpoints redirect. Image support requires
 `pip install "spideroxide[images]"`. The built-in media stores currently support local paths and
 `file://` URLs.
+
+## Runtime backends
 
 The HTTPX downloader is the default. Select the native Rust downloader explicitly:
 
@@ -825,7 +843,9 @@ export SCRAPY_RUST_BACKEND=rust
 ```
 
 Explicit Rust selection fails if the extension is unavailable. It does not silently fall back to
-Python.
+Python. The Python core remains a compatibility fallback and correctness reference while native
+parity and platform wheel coverage mature. The long-term architecture keeps Python as the public
+spider and extension layer while making Rust the required production core.
 
 ## Correctness
 
@@ -857,6 +877,8 @@ The validation suite compares:
 * explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
 * extension priorities, overrides, factories, opt-outs, async hooks, lifecycle order, and parity
 * feed formats, fields, encodings, templates, batches, filters, storage, signals, and engine parity
+* local media storage, freshness, checksums, failures, image conversion, thumbnails, and parity
+* FTP, S3, and GCS feed storage plus gzip, bzip2, and LZMA postprocessing
 * handler overrides, disabling, lifecycle, data URIs, local files, FTP, S3, and engine parity
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
@@ -891,60 +913,72 @@ with 70,000 unique requests and 30,000 duplicates.
   <tbody>
     <tr>
       <td>Fingerprinting</td>
-      <td>211.912 ms</td>
-      <td>1,873.443 ms</td>
-      <td><strong>8.84x</strong></td>
+      <td>191.075 ms</td>
+      <td>1,800.374 ms</td>
+      <td><strong>9.42x</strong></td>
     </tr>
     <tr>
       <td>Duplicate filtering</td>
-      <td>141.861 ms</td>
-      <td>1,911.053 ms</td>
-      <td><strong>13.47x</strong></td>
+      <td>121.251 ms</td>
+      <td>1,870.802 ms</td>
+      <td><strong>15.43x</strong></td>
     </tr>
     <tr>
       <td>Scheduler insertion</td>
-      <td>272.694 ms</td>
-      <td>2,443.718 ms</td>
-      <td><strong>8.96x</strong></td>
+      <td>149.358 ms</td>
+      <td>2,319.392 ms</td>
+      <td><strong>15.53x</strong></td>
     </tr>
     <tr>
       <td>Scheduler removal</td>
-      <td>220.222 ms</td>
-      <td>408.325 ms</td>
-      <td><strong>1.85x</strong></td>
+      <td>69.920 ms</td>
+      <td>393.972 ms</td>
+      <td><strong>5.63x</strong></td>
     </tr>
     <tr>
       <td>Combined scheduler flow</td>
-      <td>504.474 ms</td>
-      <td>2,743.858 ms</td>
-      <td><strong>5.44x</strong></td>
+      <td>170.683 ms</td>
+      <td>2,697.717 ms</td>
+      <td><strong>15.81x</strong></td>
     </tr>
   </tbody>
 </table>
 
-At 10,000 requests, the combined scheduler flow completed in 42.266 ms for SpiderOxide and
-271.284 ms for Scrapy, a 6.42x speedup.
+At 10,000 requests, the combined scheduler flow completed in 14.188 ms for SpiderOxide and
+257.629 ms for Scrapy, an 18.16x speedup.
 
-The comparison used SpiderOxide 0.1.0, Scrapy 2.17.0, CPython 3.14.6, and Rust 1.97.1 on macOS
+The comparison used SpiderOxide 0.1.0, Scrapy 2.17.0, CPython 3.14.6, and Rust 1.98.1 on macOS
 arm64 with 12 logical CPUs. Each value is the median of 10 measured runs after 3 warm-up runs.
 Request construction was outside the timed sections, run order alternated, and garbage collection
 ran before each timing.
 
 These are component benchmarks. They exclude networking, response parsing, selectors, middleware,
-pipelines, reactor overhead, and complete crawl behavior. They must not be interpreted as a 5.44x
-end-to-end Scrapy crawl speedup.
+pipelines, reactor overhead, and complete crawl behavior. They must not be interpreted as a 15.81x
+complete-crawl speedup.
 
 The complete 10,000 and 100,000 request results are available in the
 [Scrapy comparison report](benchmarks/results/scrapy_comparison.md),
 [JSON data](benchmarks/results/scrapy_comparison.json), and
 [CSV data](benchmarks/results/scrapy_comparison.csv).
 
-Install the comparison dependency and reproduce the benchmark with:
+Use the interactive benchmark launcher to install dependencies, build the native extension, and
+choose a benchmark or verification suite:
 
 ```bash
-python -m pip install -r requirements-benchmark.txt
-python benchmarks/benchmark_scrapy.py
+./run.sh
 ```
+
+For repeatable non-interactive runs:
+
+```bash
+./run.sh --task scrapy --size 100000
+./run.sh --task benchmarks --size 100000
+./run.sh --task all --size 100000
+```
+
+`scrapy` compares SpiderOxide with Scrapy. `benchmarks` runs the Scrapy comparison and the Python
+reference comparison. `all` runs every benchmark followed by the full verification suite. Run
+`./run.sh --help` for the complete task list.
 
 ### Python reference benchmark
 
@@ -971,6 +1005,7 @@ The repository uses a conventional mixed-language source layout:
 | `tests/` | Integration and Scrapy-compatibility verification |
 | `benchmarks/` | Performance harnesses and checked-in benchmark evidence |
 | `docs/assets/` | Documentation images and branding |
+| `run.sh` | Interactive and non-interactive benchmark and verification launcher |
 
 Format and check the Python code:
 
@@ -990,37 +1025,35 @@ cargo clippy -r
 Build the extension and run all validation scripts:
 
 ```bash
-maturin develop -r
+python -m maturin develop --release
 python tests/run_all.py
 ```
 
+Alternatively, use `./run.sh` to select a benchmark or verification task from an interactive menu.
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements.
 
-## Status
+## Project status
 
-SpiderOxide is experimental and does not yet provide full Scrapy compatibility. Crawls can persist
-native scheduling state through `JOBDIR`, while crawl results and statistics remain in memory. The
-URL canonicalizer intentionally implements a smaller contract than Scrapy.
+SpiderOxide currently covers the major crawling path: HTTP transport, scheduling, duplicate
+filtering, requests and responses, selectors, CrawlSpider rules, middleware, retries, cookies,
+robots policy, caching, persistent jobs, items, media pipelines, feed exports, proxying, download
+handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
+compatibility suite.
 
-The current foundation includes Python and Rust crawl coordination, Scrapy-compatible request and
-response classes, Python and Rust HTTP downloaders, spiders, middleware, structured Items, Item
-Loaders, item pipelines, signals, settings, stats, duplicate filtering, scheduling, selectors,
-CrawlSpider rules, native link candidate extraction, and Rust-owned retry, request depth, robots,
-download slot, and downloader statistics policies. Native cookie jars provide isolated
-Scrapy-compatible handling, while
-persistent native SQLite HTTP caching supports unconditional reuse and RFC revalidation. The native
-engine also owns persistent request and duplicate state, configured FIFO and LIFO crawl queues, and
-start-request precedence.
-The native downloader owns authenticated per-proxy connection pools. Scheme-aware download handlers
-provide HTTP, HTTPS, data URI, local file, FTP, S3, and custom protocol dispatch. Local file and
-image pipelines provide persistent freshness checks, checksums, image conversion, and thumbnails.
-Local, FTP, S3, GCS, and standard-output feed exports are available with optional compression
-postprocessing.
-SpiderOxide does not yet include remote media storage, built-in operational extensions, SOCKS proxy
-support, or Scrapy command-line compatibility.
+Known gaps include remote media storage, built-in operational extensions, additional signal
+coverage, complete fingerprint edge-case parity, project and command-line tooling, remaining spider
+contracts, SOCKS proxy support, add-on and service APIs, and Twisted interoperability. Exact
+third-party component compatibility and production hardening also remain ongoing work.
 
-The benchmark results support further integration work, but production adoption should be based on
-representative crawls that include persistence, callbacks, crawl policies, and concurrency.
+The intended end state is a Rust production core with Python retained as the public spider,
+callback, middleware, pipeline, and extension layer. The Python core backend will remain available
+until native parity and supported-platform wheel coverage are complete, then move to a
+test-and-benchmark reference role.
+
+Current performance evidence covers request-processing components rather than complete network
+crawls. Production decisions should use representative workloads that include transport, parsing,
+callbacks, policies, persistence, and concurrency.
 
 ## License
 
