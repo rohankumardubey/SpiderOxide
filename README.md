@@ -68,7 +68,7 @@ Scrapy.
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
 * Scheme-aware download handlers for HTTP, HTTPS, data URIs, local files, FTP, and S3
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
-* Priority-ordered Scrapy-compatible extensions and lifecycle signals
+* Priority-ordered Scrapy-compatible extensions, lifecycle signals, and operational monitoring
 * Streaming Scrapy-compatible JSON, JSON Lines, CSV, and XML feed exports
 * FTP, S3, and GCS feed storage with gzip, bzip2, and LZMA postprocessing
 * Safe Rust with no unsafe blocks
@@ -496,6 +496,14 @@ available from `crawler.extensions`, including iteration and `get_by_type()` ins
 Extensions receive the same engine, spider, request, response, item, and error signals on both crawl
 engines. With the Rust engine selected, scheduling and runtime policy state remain in Rust while
 extensions run as Python observers through the public signal API.
+
+The default operational extensions provide Scrapy-compatible core and log counters, periodic
+crawl-rate logging, memory usage monitoring, close conditions, memory debugging, and `JOBDIR`
+spider-state persistence. Configure them with `LOG_LEVEL`, `LOGSTATS_INTERVAL`, `MEMUSAGE_*`,
+`MEMDEBUG_ENABLED`, and `CLOSESPIDER_*`. `PeriodicLog` is opt-in through `EXTENSIONS` and supports
+boolean or `include`/`exclude` mappings through `PERIODIC_LOG_STATS` and `PERIODIC_LOG_DELTA`.
+Twisted-specific telnet support and deprecated mail-based stats notifications are intentionally
+not included.
 
 ## Feed exports
 
@@ -1041,10 +1049,10 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include remote media storage, built-in operational extensions, additional signal
-coverage, complete fingerprint edge-case parity, project and command-line tooling, remaining spider
-contracts, SOCKS proxy support, add-on and service APIs, and Twisted interoperability. Exact
-third-party component compatibility and production hardening also remain ongoing work.
+Known gaps include remote media storage, additional signal coverage, complete fingerprint edge-case
+parity, project and command-line tooling, remaining spider contracts, SOCKS proxy support, add-on
+and service APIs, and Twisted interoperability. Exact third-party component compatibility and
+production hardening also remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,
 callback, middleware, pipeline, and extension layer. The Python core backend will remain available

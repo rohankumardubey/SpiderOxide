@@ -76,12 +76,15 @@ class CrawlEngine:
         if self.concurrent_requests < 1:
             raise ValueError("CONCURRENT_REQUESTS must be at least 1")
         self._internal_downloads = asyncio.Semaphore(self.concurrent_requests)
+        self._close_event = asyncio.Event()
+        self._close_reason: str | None = None
         self.items: list[object] = []
 
     async def crawl(self) -> CrawlResult:
         tasks: set[asyncio.Task[list[object]]] = set()
         start_producer: asyncio.Task[None] | None = None
         next_start: asyncio.Task[object] | None = None
+        close_waiter = asyncio.create_task(self._wait_for_close())
         spider_opened = False
         reason = "finished"
         try:
@@ -106,9 +109,13 @@ class CrawlEngine:
                 waiters: set[asyncio.Task[object]] = set(tasks)
                 if next_start is not None:
                     waiters.add(next_start)
+                waiters.add(close_waiter)
                 if not waiters:
                     break
                 done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+
+                if close_waiter in done:
+                    close_waiter.result()
 
                 if next_start is not None and next_start in done:
                     start_output = next_start.result()
@@ -128,6 +135,8 @@ class CrawlEngine:
                 for task in completed_requests:
                     outputs = task.result()
                     await self._process_outputs(outputs)
+            if self._close_reason is not None:
+                reason = self._close_reason
         except CloseSpider as exception:
             reason = exception.reason
         except asyncio.CancelledError:
@@ -142,6 +151,7 @@ class CrawlEngine:
                 pending.append(next_start)
             if start_producer is not None:
                 pending.append(start_producer)
+            pending.append(close_waiter)
             for task in pending:
                 task.cancel()
             if pending:
@@ -149,6 +159,18 @@ class CrawlEngine:
 
             await self._finish(reason, spider_opened)
         return CrawlResult(reason, tuple(self.items), dict(self.stats.get_stats()))
+
+    def close_spider(self, reason: str = "cancelled") -> None:
+        if not reason:
+            raise ValueError("close reason must be non-empty")
+        if self._close_reason is None:
+            self._close_reason = reason
+            self._close_event.set()
+
+    async def _wait_for_close(self) -> None:
+        await self._close_event.wait()
+        assert self._close_reason is not None
+        raise CloseSpider(self._close_reason)
 
     async def _finish(self, reason: str, spider_opened: bool) -> None:
         self.stats.set_value("finish_time", asyncio.get_running_loop().time())
@@ -186,6 +208,8 @@ class CrawlEngine:
                 if isinstance(output, Request):
                     output.meta.setdefault("is_start_request", True)
                 await queue.put(output)
+        except asyncio.CancelledError:
+            raise
         except BaseException as exception:
             await queue.put(_StartFailure(exception))
         else:
@@ -438,7 +462,6 @@ class CrawlEngine:
         *,
         response: Response | None = None,
     ) -> list[object]:
-        self.stats.inc_value("spider_exceptions/count")
         kwargs: dict[str, object] = {
             "failure": exception,
             "request": request,
@@ -446,6 +469,10 @@ class CrawlEngine:
         }
         if response is not None:
             kwargs["response"] = response
+        exception_type = type(exception)
+        exception_name = f"{exception_type.__module__}.{exception_type.__qualname__}"
+        self.stats.inc_value("spider_exceptions/count")
+        self.stats.inc_value(f"spider_exceptions/{exception_name}")
         await self.signals.send(signals.spider_error, **kwargs)
         return []
 
@@ -459,7 +486,6 @@ class CrawlEngine:
             try:
                 item = await self.item_pipelines.process_item(output, self.spider)
             except DropItem as exception:
-                self.stats.inc_value("item_dropped_count")
                 await self.signals.send(
                     signals.item_dropped,
                     item=output,
@@ -468,7 +494,6 @@ class CrawlEngine:
                 )
                 continue
             self.items.append(item)
-            self.stats.inc_value("item_scraped_count")
             await self.signals.send(signals.item_scraped, item=item, spider=self.spider)
 
 
@@ -561,6 +586,8 @@ class NativeCrawlEngine(CrawlEngine):
 
     async def crawl(self) -> CrawlResult:
         tasks: set[asyncio.Task[None]] = set()
+        close_waiter = asyncio.create_task(self._wait_for_close())
+        crawl_waiter: asyncio.Future[object] | None = None
         spider_opened = False
         reason = "finished"
         try:
@@ -577,7 +604,16 @@ class NativeCrawlEngine(CrawlEngine):
 
             tasks = {asyncio.create_task(self._worker()) for _ in range(self.concurrent_requests)}
             tasks.add(asyncio.create_task(self._produce_native_start_requests()))
-            await asyncio.gather(*tasks)
+            crawl_waiter = asyncio.gather(*tasks)
+            done, _ = await asyncio.wait(
+                {crawl_waiter, close_waiter},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if close_waiter in done:
+                close_waiter.result()
+            await crawl_waiter
+            if self._close_reason is not None:
+                reason = self._close_reason
         except CloseSpider as exception:
             reason = exception.reason
         except asyncio.CancelledError:
@@ -592,6 +628,10 @@ class NativeCrawlEngine(CrawlEngine):
                 task.cancel()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
+            if crawl_waiter is not None:
+                await asyncio.gather(crawl_waiter, return_exceptions=True)
+            close_waiter.cancel()
+            await asyncio.gather(close_waiter, return_exceptions=True)
             if self.native_download_slots is not None:
                 self.native_download_slots.close()
             from .depth import sync_stats as sync_depth_stats
