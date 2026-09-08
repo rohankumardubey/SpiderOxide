@@ -62,9 +62,7 @@ class SignalManager:
         responses = []
         for receiver in tuple(self._receivers.get(signal, ())):
             try:
-                response = await maybe_await(
-                    receiver(**_accepted_kwargs(receiver, kwargs))
-                )
+                response = await maybe_await(receiver(**_accepted_kwargs(receiver, kwargs)))
             except asyncio.CancelledError:
                 raise
             except Exception as error:

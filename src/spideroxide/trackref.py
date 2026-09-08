@@ -5,9 +5,7 @@ from time import monotonic_ns
 from typing import Any
 from weakref import WeakKeyDictionary
 
-live_refs: defaultdict[type, WeakKeyDictionary[object, int]] = defaultdict(
-    WeakKeyDictionary
-)
+live_refs: defaultdict[type, WeakKeyDictionary[object, int]] = defaultdict(WeakKeyDictionary)
 
 
 class object_ref:
