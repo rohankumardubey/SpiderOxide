@@ -86,9 +86,7 @@ class CoreStats:
         spider: Spider,
     ) -> None:
         self.crawler.stats.inc_value("item_dropped_count")
-        self.crawler.stats.inc_value(
-            f"item_dropped_reasons_count/{type(exception).__name__}"
-        )
+        self.crawler.stats.inc_value(f"item_dropped_reasons_count/{type(exception).__name__}")
 
     def response_received(
         self,
@@ -482,9 +480,7 @@ class PeriodicLog:
         )
         self.timing_enabled = settings.getbool("PERIODIC_LOG_TIMING_ENABLED", False)
         if self.interval <= 0 or not (
-            self.stats_config is not None
-            or self.delta_config is not None
-            or self.timing_enabled
+            self.stats_config is not None or self.delta_config is not None or self.timing_enabled
         ):
             raise NotConfigured
         self._task: asyncio.Task[None] | None = None

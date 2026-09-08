@@ -309,11 +309,7 @@ async def _verify_periodic_logging() -> None:
         operational_logger.removeHandler(log_handler)
     assert result.reason == "finished"
     assert any(message.startswith("Crawled ") for message in log_handler.messages)
-    periodic_messages = [
-        message
-        for message in log_handler.messages
-        if message.startswith("{")
-    ]
+    periodic_messages = [message for message in log_handler.messages if message.startswith("{")]
     assert len(periodic_messages) >= 2
     final_payload = json.loads(periodic_messages[-1])
     assert "response_received_count" in final_payload["delta"]
