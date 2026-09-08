@@ -10,6 +10,8 @@ from typing import Any, NoReturn, Protocol, TypeVar
 from itemadapter import ItemAdapter
 from itemadapter.adapter import ScrapyItemAdapter
 
+from .trackref import object_ref
+
 RequestData = tuple[str, str, bytes, int]
 ItemType = TypeVar("ItemType", bound="Item")
 
@@ -45,7 +47,7 @@ class ItemMeta(ABCMeta):
         return cls
 
 
-class Item(MutableMapping[str, Any], metaclass=ItemMeta):
+class Item(MutableMapping[str, Any], object_ref, metaclass=ItemMeta):
     """Mapping with an explicit, metadata-aware field schema."""
 
     fields: dict[str, Field]
@@ -95,7 +97,7 @@ class Item(MutableMapping[str, Any], metaclass=ItemMeta):
     def deepcopy(self: ItemType) -> ItemType:
         return deepcopy(self)
 
-    __hash__ = object.__hash__
+    __hash__ = object_ref.__hash__
 
 
 class SpiderOxideItemAdapter(ScrapyItemAdapter):

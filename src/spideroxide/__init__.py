@@ -75,6 +75,18 @@ from .httpcache import (
     RFC2616Policy,
 )
 from .linkextractors import Link, LinkExtractor, LxmlLinkExtractor
+from .operational import (
+    CloseSpider as CloseSpiderExtension,
+)
+from .operational import (
+    CoreStats,
+    LogCount,
+    LogStats,
+    MemoryDebugger,
+    MemoryUsage,
+    PeriodicLog,
+    SpiderState,
+)
 from .pipelines import (
     FileException,
     FileInfo,
@@ -120,7 +132,9 @@ __all__ = [
     "BlockingFeedStorage",
     "Bz2Plugin",
     "CloseSpider",
+    "CloseSpiderExtension",
     "Compose",
+    "CoreStats",
     "CookiesMiddleware",
     "Crawler",
     "CrawlerRunner",
@@ -174,14 +188,20 @@ __all__ = [
     "LinkExtractor",
     "LxmlLinkExtractor",
     "LZMAPlugin",
+    "LogCount",
+    "LogStats",
     "MapCompose",
     "MediaPipeline",
+    "MemoryDebugger",
+    "MemoryUsage",
+    "SpiderState",
     "NotConfigured",
     "NotSupported",
     "NativeCrawlEngine",
     "NativeHttpCacheStorage",
     "PriorityRequest",
     "PostProcessingManager",
+    "PeriodicLog",
     "Request",
     "RequestData",
     "RFC2616Policy",
