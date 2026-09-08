@@ -329,7 +329,7 @@ impl NativeHttpClient {
                 response_body.extend_from_slice(&chunk[..bytes_read]);
             }
 
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 Py::new(
                     py,
                     NativeHttpResponse {

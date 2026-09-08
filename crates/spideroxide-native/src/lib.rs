@@ -176,7 +176,7 @@ impl RustDupeFilter {
     }
 }
 
-#[pyclass(module = "spideroxide._native")]
+#[pyclass(module = "spideroxide._native", skip_from_py_object)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Request {
     url: String,
