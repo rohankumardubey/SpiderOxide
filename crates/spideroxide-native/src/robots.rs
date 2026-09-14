@@ -176,7 +176,7 @@ impl NativeRobotsRuntime {
 
     fn wait<'py>(&self, py: Python<'py>, origin: String) -> PyResult<Bound<'py, PyAny>> {
         let state = self.state.clone();
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        crate::runtime::future_into_py(py, async move {
             loop {
                 let notified = {
                     let current = state.lock().map_err(|_| {

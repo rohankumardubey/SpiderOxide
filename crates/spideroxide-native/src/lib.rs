@@ -11,6 +11,7 @@ mod links;
 mod media;
 mod policy;
 mod robots;
+mod runtime;
 mod slots;
 
 use cookies::NativeCookieJar;
@@ -25,6 +26,7 @@ use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
 use robots::{NativeRobotsDecision, NativeRobotsRuntime};
+use runtime::shutdown_async_runtime;
 use sha2::{Digest, Sha256};
 use slots::{NativeDownloadSlotLease, NativeDownloadSlotManager};
 use url::{Url, form_urlencoded};
@@ -366,6 +368,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_batch, module)?)?;
     module.add_function(wrap_pyfunction!(extract_link_candidates, module)?)?;
+    module.add_function(wrap_pyfunction!(shutdown_async_runtime, module)?)?;
     module.add(
         "NativeDownloadError",
         module.py().get_type::<NativeDownloadError>(),
@@ -387,5 +390,9 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<Request>()?;
     module.add_class::<RustDupeFilter>()?;
     module.add_class::<RustScheduler>()?;
+    module
+        .py()
+        .import("atexit")?
+        .call_method1("register", (module.getattr("_shutdown_async_runtime")?,))?;
     Ok(())
 }

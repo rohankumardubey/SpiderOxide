@@ -276,7 +276,7 @@ impl NativeDownloadSlotManager {
         let state = self.state.clone();
         let notify = self.notify.clone();
         let default_randomize = self.randomize_delay;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        crate::runtime::future_into_py(py, async move {
             let mut waiter = SlotWaiter {
                 state: state.clone(),
                 notify: notify.clone(),
