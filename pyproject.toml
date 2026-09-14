@@ -49,6 +49,10 @@ remote-feeds = [
     "boto3>=1.35,<2",
     "google-cloud-storage>=2.18,<4",
 ]
+remote-media = [
+    "boto3>=1.35,<2",
+    "google-cloud-storage>=2.18,<4",
+]
 dev = [
     "maturin>=1.7,<2",
     "ruff>=0.9,<1",
