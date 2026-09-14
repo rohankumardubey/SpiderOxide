@@ -1181,7 +1181,6 @@ dependencies = [
  "once_cell",
  "pin-project-lite",
  "pyo3",
- "tokio",
 ]
 
 [[package]]

@@ -246,7 +246,7 @@ impl NativeHttpClient {
         )?;
         let max_size = self.max_size;
         let timeout = self.timeout;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        crate::runtime::future_into_py(py, async move {
             let parsed_method = Method::from_bytes(method.as_bytes()).map_err(|error| {
                 download_error(format!("invalid HTTP method {method:?}: {error}"))
             })?;

@@ -427,7 +427,7 @@ impl NativeCrawlCoordinator {
         let state = self.state.clone();
         let notify = self.notify.clone();
         let concurrency = self.concurrency;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        crate::runtime::future_into_py(py, async move {
             loop {
                 let notified = notify.notified();
                 let mut popped = None;
@@ -467,7 +467,7 @@ impl NativeCrawlCoordinator {
         let state = self.state.clone();
         let notify = self.notify.clone();
         let pending_limit = self.pending_limit;
-        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+        crate::runtime::future_into_py(py, async move {
             loop {
                 let notified = notify.notified();
                 {
