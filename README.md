@@ -192,12 +192,30 @@ RGB JPEG when needed, and stored under `full/<sha1>.jpg`; thumbnails use
 or `uptodate` status. Local persistence, atomic replacement, MD5 checksums, and freshness metadata
 are handled by `NativeMediaStore`.
 
+Media stores also accept `s3://`, `gs://`, and `ftp://` URIs. Remote objects retain the same
+deterministic paths, freshness checks, checksums, image dimensions, content types, and cache-control
+metadata as local media:
+
+```python
+settings = {
+    "FILES_STORE": "s3://crawler-media/files",
+    "IMAGES_STORE": "gs://crawler-media/images",
+    "FILES_STORE_S3_ACL": "private",
+    "IMAGES_STORE_GCS_ACL": "",
+}
+```
+
+S3 uses the shared `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
+`AWS_ENDPOINT_URL`, `AWS_REGION_NAME`, `AWS_USE_SSL`, and `AWS_VERIFY` settings. GCS uses
+`GCS_PROJECT_ID`. FTP credentials may be included in the URI or supplied through `FTP_USER` and
+`FTP_PASSWORD`; `FEED_STORAGE_FTP_ACTIVE` selects active mode. Install
+`spideroxide[remote-media]`, `spideroxide[s3]`, or `spideroxide[gcs]` for cloud storage.
+
 Set `FILES_URLS_FIELD`, `FILES_RESULT_FIELD`, `FILES_EXPIRES`, `IMAGES_URLS_FIELD`,
 `IMAGES_RESULT_FIELD`, `IMAGES_EXPIRES`, `IMAGES_MIN_WIDTH`, `IMAGES_MIN_HEIGHT`, and
 `IMAGES_THUMBS` to customize behavior. Redirects are rejected by default; enable
 `MEDIA_ALLOW_REDIRECTS` when media endpoints redirect. Image support requires
-`pip install "spideroxide[images]"`. The built-in media stores currently support local paths and
-`file://` URLs.
+`pip install "spideroxide[images]"`.
 
 ## Runtime backends
 
@@ -1049,10 +1067,10 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include remote media storage, additional signal coverage, complete fingerprint edge-case
-parity, project and command-line tooling, remaining spider contracts, SOCKS proxy support, add-on
-and service APIs, and Twisted interoperability. Exact third-party component compatibility and
-production hardening also remain ongoing work.
+Known gaps include additional signal coverage, complete fingerprint edge-case parity, project and
+command-line tooling, remaining spider contracts, SOCKS proxy support, add-on and service APIs, and
+Twisted interoperability. Exact third-party component compatibility and production hardening also
+remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,
 callback, middleware, pipeline, and extension layer. The Python core backend will remain available

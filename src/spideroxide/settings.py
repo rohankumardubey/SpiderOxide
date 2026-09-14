@@ -45,6 +45,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "FILES_EXPIRES": 90,
     "FILES_URLS_FIELD": "file_urls",
     "FILES_RESULT_FIELD": "files",
+    "FILES_STORE_GCS_ACL": "",
+    "FILES_STORE_S3_ACL": "private",
     "IMAGES_STORE": None,
     "IMAGES_EXPIRES": 90,
     "IMAGES_URLS_FIELD": "image_urls",
@@ -52,6 +54,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "IMAGES_MIN_WIDTH": 0,
     "IMAGES_MIN_HEIGHT": 0,
     "IMAGES_THUMBS": {},
+    "IMAGES_STORE_GCS_ACL": "",
+    "IMAGES_STORE_S3_ACL": "private",
     "USER_AGENT": "SpiderOxide/0.1",
     "DOWNLOADER_MIDDLEWARES_BASE": {
         "spideroxide.robots.RobotsTxtMiddleware": 100,
@@ -123,6 +127,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "AWS_SESSION_TOKEN": None,
     "AWS_ENDPOINT_URL": None,
     "AWS_REGION_NAME": None,
+    "AWS_USE_SSL": None,
+    "AWS_VERIFY": None,
     "GCS_PROJECT_ID": None,
     "FEED_EXPORTERS_BASE": {
         "json": "spideroxide.feedexport.JsonItemExporter",

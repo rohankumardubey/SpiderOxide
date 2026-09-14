@@ -92,9 +92,12 @@ from .pipelines import (
     FileInfo,
     FilesPipeline,
     FSFilesStore,
+    FTPFilesStore,
+    GCSFilesStore,
     ImageException,
     ImagesPipeline,
     MediaPipeline,
+    S3FilesStore,
 )
 from .proxy import HttpProxyMiddleware
 from .retry import RetryMiddleware, get_retry_request
@@ -161,10 +164,12 @@ __all__ = [
     "FileInfo",
     "FilesPipeline",
     "FSFilesStore",
+    "FTPFilesStore",
     "FormRequest",
     "FTPFeedStorage",
     "FTPDownloadHandler",
     "GCSFeedStorage",
+    "GCSFilesStore",
     "GzipPlugin",
     "Headers",
     "HtmlResponse",
@@ -209,6 +214,7 @@ __all__ = [
     "RetryMiddleware",
     "Rule",
     "S3FeedStorage",
+    "S3FilesStore",
     "S3DownloadHandler",
     "RustDownloader",
     "ScheduledRequest",
