@@ -76,6 +76,30 @@ fn response_reader(response: Response, encodings: &[String]) -> ResponseReader {
     reader
 }
 
+fn call_headers_callback(
+    callback: Option<&Py<PyAny>>,
+    headers: &[(String, Vec<u8>)],
+    body_length: Option<u64>,
+) -> PyResult<bool> {
+    let Some(callback) = callback else {
+        return Ok(false);
+    };
+    Python::attach(|py| {
+        let headers = headers
+            .iter()
+            .map(|(name, value)| (name.clone(), PyBytes::new(py, value).unbind()))
+            .collect::<Vec<_>>();
+        callback.call1(py, (headers, body_length))?.extract(py)
+    })
+}
+
+fn call_bytes_callback(callback: Option<&Py<PyAny>>, data: &[u8]) -> PyResult<bool> {
+    let Some(callback) = callback else {
+        return Ok(false);
+    };
+    Python::attach(|py| callback.call1(py, (PyBytes::new(py, data),))?.extract(py))
+}
+
 fn client_builder(user_agent: Option<&str>) -> ClientBuilder {
     let mut default_headers = HeaderMap::new();
     default_headers.insert(
@@ -127,6 +151,7 @@ pub(crate) struct NativeHttpResponse {
     body: Vec<u8>,
     protocol: String,
     latency: f64,
+    stopped: bool,
 }
 
 #[pymethods]
@@ -162,6 +187,11 @@ impl NativeHttpResponse {
     #[getter]
     fn latency(&self) -> f64 {
         self.latency
+    }
+
+    #[getter]
+    fn stopped(&self) -> bool {
+        self.stopped
     }
 }
 
@@ -228,7 +258,16 @@ impl NativeHttpClient {
         })
     }
 
-    #[pyo3(signature = (url, method, headers, body, proxy = None))]
+    #[pyo3(signature = (
+        url,
+        method,
+        headers,
+        body,
+        proxy = None,
+        headers_callback = None,
+        bytes_callback = None
+    ))]
+    #[allow(clippy::too_many_arguments)]
     fn fetch<'py>(
         &self,
         py: Python<'py>,
@@ -237,6 +276,8 @@ impl NativeHttpClient {
         headers: Vec<(String, Vec<u8>)>,
         body: Vec<u8>,
         proxy: Option<(String, Option<Vec<u8>>)>,
+        headers_callback: Option<Py<PyAny>>,
+        bytes_callback: Option<Py<PyAny>>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.client_for_proxy(
             proxy.as_ref().map(|(url, _)| url.as_str()),
@@ -278,15 +319,6 @@ impl NativeHttpClient {
                 .map_err(|error| download_error(format!("unable to download {url}: {error}")))?;
             let latency = started.elapsed().as_secs_f64();
 
-            if let Some(declared_size) = response.content_length()
-                && max_size != 0
-                && declared_size > max_size as u64
-            {
-                return Err(download_error(format!(
-                    "response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)"
-                )));
-            }
-
             let final_url = response.url().to_string();
             let status = response.status().as_u16();
             let protocol = protocol_name(response.version());
@@ -295,12 +327,26 @@ impl NativeHttpClient {
                 .headers()
                 .iter()
                 .map(|(name, value)| (name.as_str().to_owned(), value.as_bytes().to_vec()))
-                .collect();
+                .collect::<Vec<_>>();
+            let mut stopped = call_headers_callback(
+                headers_callback.as_ref(),
+                &response_headers,
+                response.content_length(),
+            )?;
+            if !stopped
+                && let Some(declared_size) = response.content_length()
+                && max_size != 0
+                && declared_size > max_size as u64
+            {
+                return Err(download_error(format!(
+                    "response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)"
+                )));
+            }
 
             let mut reader = response_reader(response, &encodings);
             let mut response_body = Vec::new();
             let mut chunk = [0_u8; 16 * 1024];
-            loop {
+            while !stopped {
                 let bytes_read = tokio::time::timeout(timeout, reader.read(&mut chunk))
                     .await
                     .map_err(|_| {
@@ -321,12 +367,13 @@ impl NativeHttpClient {
                     .len()
                     .checked_add(bytes_read)
                     .ok_or_else(|| download_error("response body size overflowed"))?;
-                if max_size != 0 && next_size > max_size {
+                response_body.extend_from_slice(&chunk[..bytes_read]);
+                stopped = call_bytes_callback(bytes_callback.as_ref(), &chunk[..bytes_read])?;
+                if !stopped && max_size != 0 && next_size > max_size {
                     return Err(download_error(format!(
                         "response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)"
                     )));
                 }
-                response_body.extend_from_slice(&chunk[..bytes_read]);
             }
 
             Python::attach(|py| {
@@ -339,6 +386,7 @@ impl NativeHttpClient {
                         body: response_body,
                         protocol,
                         latency,
+                        stopped,
                     },
                 )
             })

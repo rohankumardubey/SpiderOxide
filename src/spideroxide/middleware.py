@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable
 
+from . import signals
 from .components import build_components
 from .exceptions import CloseSpider, DropItem
 from .http import Request, Response
@@ -106,7 +107,25 @@ class DownloaderMiddlewareManager:
                     response = result
                     break
             if response is None:
-                response = await download(request)
+                self.crawler.signals.send_sync(  # type: ignore[attr-defined]
+                    signals.request_reached_downloader,
+                    request=request,
+                    spider=spider,
+                )
+                try:
+                    response = await download(request)
+                    self.crawler.signals.send_sync(  # type: ignore[attr-defined]
+                        signals.response_downloaded,
+                        response=response,
+                        request=request,
+                        spider=spider,
+                    )
+                finally:
+                    self.crawler.signals.send_sync(  # type: ignore[attr-defined]
+                        signals.request_left_downloader,
+                        request=request,
+                        spider=spider,
+                    )
         except Exception as exception:
             response = await self._process_exception(request, exception, spider)
             if response is None:

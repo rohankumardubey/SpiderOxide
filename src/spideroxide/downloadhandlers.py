@@ -51,7 +51,10 @@ class BaseDownloadHandler:
 class HTTPDownloadHandler(BaseDownloadHandler):
     def __init__(self, crawler: object) -> None:
         super().__init__(crawler)
-        self.downloader: Downloader = create_downloader(crawler.settings)  # type: ignore[attr-defined]
+        self.downloader: Downloader = create_downloader(  # type: ignore[attr-defined]
+            crawler.settings,
+            crawler=crawler,
+        )
 
     async def download_request(self, request: Request) -> Response:
         return await self.downloader.fetch(request)

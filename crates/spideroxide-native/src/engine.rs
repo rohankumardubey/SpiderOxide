@@ -182,6 +182,7 @@ struct CoordinatorState {
     job_store: Option<PersistentJobStore>,
     persistence_enabled: bool,
     input_closed: bool,
+    empty_reported: bool,
     finished: bool,
     aborted: bool,
 }
@@ -253,6 +254,7 @@ impl CoordinatorState {
             job_store,
             persistence_enabled,
             input_closed: false,
+            empty_reported: false,
             finished: false,
             aborted: false,
         })
@@ -418,6 +420,7 @@ impl NativeCrawlCoordinator {
                 PyValueError::new_err(format!("request {request_id} is not staged"))
             })?;
             state.queues.push(entry);
+            state.empty_reported = false;
         }
         self.notify.notify_waiters();
         Ok(())
@@ -450,7 +453,10 @@ impl NativeCrawlCoordinator {
                         && current.queues.is_empty()
                         && current.active.is_empty()
                     {
-                        current.finished = true;
+                        return Ok(None);
+                    }
+                    if popped.is_none() && !current.empty_reported {
+                        current.empty_reported = true;
                         return Ok(None);
                     }
                 }
@@ -484,6 +490,15 @@ impl NativeCrawlCoordinator {
                 notified.await;
             }
         })
+    }
+
+    #[getter]
+    fn is_drained(&self) -> PyResult<bool> {
+        let state = self.lock_state()?;
+        Ok(state.input_closed
+            && state.staged.is_empty()
+            && state.queues.is_empty()
+            && state.active.is_empty())
     }
 
     fn complete(&self, request_id: u64) -> PyResult<()> {

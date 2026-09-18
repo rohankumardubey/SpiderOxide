@@ -198,7 +198,8 @@ async def _verify_signal_argument_filtering() -> None:
             spider=spider,
         )
     assert seen == [spider]
-    assert isinstance(responses[0][1], RuntimeError)
+    assert isinstance(responses[0][1], signals.SignalFailure)
+    assert isinstance(responses[0][1].exception, RuntimeError)
 
 
 async def _verify_log_count(engine: str) -> None:

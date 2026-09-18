@@ -355,10 +355,9 @@ async def _verify_signal_ordering() -> None:
             events.append(f"fetch:{request.url}")
             return await super().fetch(request)
 
-    async def scheduled(request: Request, spider: Spider) -> None:
+    def scheduled(request: Request, spider: Spider) -> None:
         assert spider.name == "native-concurrency"
         events.append(f"signal-start:{request.url}")
-        await asyncio.sleep(0.01)
         events.append(f"signal-end:{request.url}")
 
     downloader = SignalDownloader()

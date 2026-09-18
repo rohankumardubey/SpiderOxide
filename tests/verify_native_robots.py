@@ -20,6 +20,7 @@ from spideroxide import (  # noqa: E402
     Request,
     Response,
     Spider,
+    signals,
 )
 
 
@@ -123,6 +124,7 @@ class RobotsDownloader:
             if parsed.hostname == "example.test":
                 body = b"""
                     User-agent: SpiderOxide
+                    Crawl-delay: 1.5
                     Disallow: /private
                     Allow: /private/open
 
@@ -197,6 +199,12 @@ async def _verify_crawler() -> None:
         },
         downloader=downloader,
     )
+    parsed: list[tuple[object, Request]] = []
+
+    def robots_parsed(robotparser: object, request: Request) -> None:
+        parsed.append((robotparser, request))
+
+    crawler.signals.connect(robots_parsed, signals.robots_parsed)
     result = await crawler.crawl()
     assert result.reason == "finished"
     assert downloader.closed
@@ -225,6 +233,14 @@ async def _verify_crawler() -> None:
     assert result.stats["robotstxt/bypassed"] == 1
     assert result.stats["robotstxt/exception_count/spideroxide.exceptions.DownloadError"] == 1
     assert crawler.native_robots_runtime is not None
+    assert len(parsed) == 2
+    example_parser = next(
+        parser for parser, request in parsed if request.url.startswith("https://example.test/")
+    )
+    assert example_parser.allowed("https://example.test/public", "SpiderOxide")
+    assert not example_parser.allowed("https://example.test/private", "SpiderOxide")
+    assert example_parser.allowed(b"https://example.test/public", b"SpiderOxide")
+    assert example_parser.crawl_delay("SpiderOxide") == 1.5
 
 
 class OverrideSpider(Spider):
@@ -256,6 +272,44 @@ async def _verify_user_agent_and_status() -> None:
     assert result.stats["robotstxt/forbidden"] == 2
     assert result.stats["robotstxt/response_status_count/200"] == 1
     assert result.stats["robotstxt/response_status_count/404"] == 1
+
+
+class ParserPublicationSpider(Spider):
+    name = "robots-parser-publication"
+    start_urls = [
+        "https://example.test/public",
+        "https://example.test/private/open",
+    ]
+
+    def parse(self, response: Response) -> dict[str, str]:
+        return {"url": response.url}
+
+
+async def _verify_parser_publication() -> None:
+    downloader = RobotsDownloader()
+    crawler = Crawler(
+        ParserPublicationSpider,
+        {
+            "ENGINE_BACKEND": "rust",
+            "CONCURRENT_REQUESTS": 2,
+            "ROBOTSTXT_OBEY": True,
+        },
+        downloader=downloader,
+    )
+    signal_started = asyncio.Event()
+    release_signal = asyncio.Event()
+
+    async def robots_parsed() -> None:
+        signal_started.set()
+        await release_signal.wait()
+
+    crawler.signals.connect(robots_parsed, signals.robots_parsed)
+    crawl = asyncio.create_task(crawler.crawl())
+    await asyncio.wait_for(signal_started.wait(), 1)
+    assert [request.url for request in downloader.history] == ["https://example.test/robots.txt"]
+    release_signal.set()
+    result = await asyncio.wait_for(crawl, 1)
+    assert len(result.items) == 2
 
 
 class BlockingRobotsDownloader:
@@ -342,6 +396,7 @@ async def main() -> None:
     await _verify_runtime()
     await _verify_crawler()
     await _verify_user_agent_and_status()
+    await _verify_parser_publication()
     await _verify_cancellation()
     await _verify_native_requirement()
     print("Native robots policy verification passed.")

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
+from . import signals
 from .backend import BackendUnavailableError
 from .exceptions import IgnoreRequest, NotConfigured
 from .headers import Headers
@@ -77,6 +78,18 @@ class RobotsTxtMiddleware:
 
             try:
                 response = await self._fetch_robots(decision.robots_url)
+                robotparser = self.runtime.parser(response.body)
+                await self.crawler.signals.send(
+                    signals.robots_parsed,
+                    robotparser=robotparser,
+                    request=request,
+                    spider=spider,
+                )
+                self.runtime.complete(
+                    decision.origin,
+                    response.status,
+                    response.body,
+                )
             except BaseException as error:
                 exception_type = f"{type(error).__module__}.{type(error).__qualname__}"
                 self.runtime.fail(decision.origin, exception_type)
@@ -85,7 +98,6 @@ class RobotsTxtMiddleware:
                     continue
                 raise
             else:
-                self.runtime.complete(decision.origin, response.status, response.body)
                 sync_stats(self.crawler)
 
     async def _fetch_robots(self, url: str) -> Response:
