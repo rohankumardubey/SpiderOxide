@@ -60,7 +60,7 @@ Scrapy.
 * Rust-owned retry policies and downloader statistics with Scrapy-compatible APIs
 * Scrapy-compatible request depth limits, priorities, and statistics
 * Downloader and spider middleware
-* Item pipelines, signals, settings, and crawl statistics
+* Item pipelines, Scrapy-compatible signals, settings, and crawl statistics
 * Scrapy-compatible cookie middleware with isolated native cookie jars
 * Persistent Scrapy-compatible HTTP caching with native SQLite storage
 * Scrapy-compatible file and image pipelines with native persistent storage
@@ -515,6 +515,18 @@ Extensions receive the same engine, spider, request, response, item, and error s
 engines. With the Rust engine selected, scheduling and runtime policy state remain in Rust while
 extensions run as Python observers through the public signal API.
 
+Signal coverage includes engine and spider lifecycle, scheduler state, downloader entry and exit,
+raw response downloads, response headers and body chunks, robots policy parsing, item success,
+drops and errors, and feed export events. Scheduling receivers can raise `IgnoreRequest` to reject a
+request before insertion. Idle receivers can raise `DontCloseSpider` to keep the crawl alive while
+adding more work.
+
+`headers_received` and `bytes_received` are synchronous transport signals. Raising
+`StopDownload(fail=True)` stops the transfer and routes its partial response to the request errback;
+`StopDownload(fail=False)` routes it to the normal callback. In both cases the partial response
+includes `download_stopped` in `Response.flags`. The Python and Rust downloaders expose the same
+observable behavior.
+
 The default operational extensions provide Scrapy-compatible core and log counters, periodic
 crawl-rate logging, memory usage monitoring, close conditions, memory debugging, and `JOBDIR`
 spider-state persistence. Configure them with `LOG_LEVEL`, `LOGSTATS_INTERVAL`, `MEMUSAGE_*`,
@@ -902,6 +914,7 @@ The validation suite compares:
 * request depth limits, priority adjustments, verbose stats, arbitrary integers, and engine parity
 * explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
 * extension priorities, overrides, factories, opt-outs, async hooks, lifecycle order, and parity
+* scheduler, downloader, streaming, robots, idle, item-error, and partial-download signals
 * feed formats, fields, encodings, templates, batches, filters, storage, signals, and engine parity
 * local media storage, freshness, checksums, failures, image conversion, thumbnails, and parity
 * FTP, S3, and GCS feed storage plus gzip, bzip2, and LZMA postprocessing
@@ -1067,10 +1080,10 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include additional signal coverage, complete fingerprint edge-case parity, project and
-command-line tooling, remaining spider contracts, SOCKS proxy support, add-on and service APIs, and
-Twisted interoperability. Exact third-party component compatibility and production hardening also
-remain ongoing work.
+Known gaps include complete fingerprint edge-case parity, project and command-line tooling,
+remaining spider contracts, SOCKS proxy support, add-on and service APIs, and Twisted
+interoperability. Exact third-party component compatibility and production hardening also remain
+ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,
 callback, middleware, pipeline, and extension layer. The Python core backend will remain available

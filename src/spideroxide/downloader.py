@@ -2,20 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import concurrent.futures
 import math
 import mimetypes
-from collections.abc import Iterable
-from typing import Protocol
+import threading
+from collections.abc import Callable, Iterable
+from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
 import httpx
 
+from . import signals
 from .backend import BackendUnavailableError
 from .cookies import _request_cookie_header
-from .exceptions import DownloadError
+from .exceptions import DownloadError, StopDownload
 from .headers import Headers
 from .http import HtmlResponse, Request, Response, TextResponse, XmlResponse
 from .settings import Settings
+
+if TYPE_CHECKING:
+    from .crawler import Crawler
 
 
 class Downloader(Protocol):
@@ -106,6 +112,7 @@ def _response(
     header_pairs: Iterable[tuple[str, str | bytes]],
     body: bytes,
     protocol: str,
+    flags: Iterable[str] = (),
 ) -> Response:
     headers = Headers()
     for name, value in header_pairs:
@@ -118,7 +125,61 @@ def _response(
         body=body,
         request=request,
         protocol=protocol,
+        flags=flags,
     )
+
+
+def _stop_download(
+    crawler: Crawler | None,
+    signal: str,
+    **kwargs: object,
+) -> StopDownload | None:
+    if crawler is None:
+        return None
+    responses = crawler.signals.send_sync(
+        signal,
+        dont_log=StopDownload,
+        **kwargs,
+    )
+    return next(
+        (
+            response.exception
+            for _, response in responses
+            if isinstance(response, signals.SignalFailure)
+            and isinstance(response.exception, StopDownload)
+        ),
+        None,
+    )
+
+
+def _call_on_loop_thread(
+    loop: asyncio.AbstractEventLoop,
+    loop_thread_id: int,
+    callback: Callable[..., bool],
+    *args: object,
+) -> bool:
+    if threading.get_ident() == loop_thread_id:
+        return callback(*args)
+    result: concurrent.futures.Future[bool] = concurrent.futures.Future()
+
+    def invoke() -> None:
+        try:
+            result.set_result(callback(*args))
+        except BaseException as error:
+            result.set_exception(error)
+
+    loop.call_soon_threadsafe(invoke)
+    return result.result()
+
+
+def _body_length(headers: Headers) -> int | None:
+    value = headers.get("Content-Length")
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
 
 
 def _proxy_details(request: Request) -> tuple[str | None, bytes | None]:
@@ -159,12 +220,14 @@ class HttpxDownloader:
         settings: Settings | None = None,
         *,
         transport: httpx.AsyncBaseTransport | None = None,
+        crawler: Crawler | None = None,
     ) -> None:
         self.settings = settings or Settings()
         timeout, self.max_size, user_agent = _download_settings(self.settings)
         self._timeout = timeout
         self._user_agent = user_agent
         self._transport = transport
+        self._crawler = crawler
         self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
         self.client = self._create_client()
         self._proxy_clients: dict[tuple[str, bytes | None], httpx.AsyncClient] = {}
@@ -222,27 +285,54 @@ class HttpxDownloader:
                 content=request.body or None,
             ) as raw_response:
                 request.meta["download_latency"] = asyncio.get_running_loop().time() - started
+                response_headers = Headers()
+                for name, value in raw_response.headers.multi_items():
+                    response_headers.appendlist(name, value)
+                stop = _stop_download(
+                    self._crawler,
+                    signals.headers_received,
+                    headers=response_headers,
+                    body_length=_body_length(response_headers),
+                    request=request,
+                    spider=None if self._crawler is None else self._crawler.spider,
+                )
                 declared_size = int(raw_response.headers.get("Content-Length", 0))
-                if self.max_size and declared_size > self.max_size:
+                if stop is None and self.max_size and declared_size > self.max_size:
                     raise DownloadError(
                         f"response exceeded DOWNLOAD_MAXSIZE ({self.max_size} bytes)"
                     )
                 body = bytearray()
-                async for chunk in raw_response.aiter_bytes():
-                    body.extend(chunk)
-                    if self.max_size and len(body) > self.max_size:
-                        raise DownloadError(
-                            f"response exceeded DOWNLOAD_MAXSIZE ({self.max_size} bytes)"
+                if stop is None:
+                    async for chunk in raw_response.aiter_bytes():
+                        body.extend(chunk)
+                        stop = _stop_download(
+                            self._crawler,
+                            signals.bytes_received,
+                            data=chunk,
+                            request=request,
+                            spider=None if self._crawler is None else self._crawler.spider,
                         )
+                        if stop is not None:
+                            break
+                        if self.max_size and len(body) > self.max_size:
+                            raise DownloadError(
+                                f"response exceeded DOWNLOAD_MAXSIZE ({self.max_size} bytes)"
+                            )
 
-                return _response(
+                response = _response(
                     request,
                     url=str(raw_response.url),
                     status=raw_response.status_code,
-                    header_pairs=raw_response.headers.multi_items(),
+                    header_pairs=response_headers.to_raw_pairs(),
                     body=bytes(body),
                     protocol=raw_response.http_version,
+                    flags=("download_stopped",) if stop is not None else (),
                 )
+                if stop is not None:
+                    stop.response = response
+                    if stop.fail:
+                        raise stop
+                return response
         except httpx.HTTPError as error:
             raise DownloadError(f"unable to download {request.url}: {error}") from error
 
@@ -269,8 +359,14 @@ def _request_headers(request: Request, *, cookies_enabled: bool) -> list[tuple[s
 
 
 class RustDownloader:
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        crawler: Crawler | None = None,
+    ) -> None:
         self.settings = settings or Settings()
+        self._crawler = crawler
         timeout, max_size, user_agent = _download_settings(self.settings)
         try:
             from ._native import NativeDownloadError, NativeHttpClient
@@ -289,6 +385,62 @@ class RustDownloader:
         if client is None:
             raise RuntimeError("downloader is closed")
         proxy, authorization = _proxy_details(request)
+        stopped: list[StopDownload] = []
+        loop = asyncio.get_running_loop()
+        loop_thread_id = threading.get_ident()
+
+        def headers_received(
+            header_pairs: Iterable[tuple[str, bytes]],
+            body_length: int | None,
+        ) -> bool:
+            headers = Headers(header_pairs)
+            stop = _stop_download(
+                self._crawler,
+                signals.headers_received,
+                headers=headers,
+                body_length=body_length,
+                request=request,
+                spider=None if self._crawler is None else self._crawler.spider,
+            )
+            if stop is not None:
+                stopped.append(stop)
+            return stop is not None
+
+        def bytes_received(data: bytes) -> bool:
+            stop = _stop_download(
+                self._crawler,
+                signals.bytes_received,
+                data=data,
+                request=request,
+                spider=None if self._crawler is None else self._crawler.spider,
+            )
+            if stop is not None:
+                stopped.append(stop)
+            return stop is not None
+
+        def native_headers_received(
+            header_pairs: Iterable[tuple[str, bytes]],
+            body_length: int | None,
+        ) -> bool:
+            return _call_on_loop_thread(
+                loop,
+                loop_thread_id,
+                headers_received,
+                header_pairs,
+                body_length,
+            )
+
+        def native_bytes_received(data: bytes) -> bool:
+            return _call_on_loop_thread(
+                loop,
+                loop_thread_id,
+                bytes_received,
+                data,
+            )
+
+        native_headers_callback = native_headers_received if self._crawler is not None else None
+        native_bytes_callback = native_bytes_received if self._crawler is not None else None
+
         try:
             raw_response = await client.fetch(
                 request.url,
@@ -296,35 +448,44 @@ class RustDownloader:
                 _request_headers(request, cookies_enabled=self._cookies_enabled),
                 request.body,
                 None if proxy is None else (proxy, authorization),
+                native_headers_callback,
+                native_bytes_callback,
             )
         except self._download_error as error:
             raise DownloadError(str(error)) from error
 
         request.meta["download_latency"] = raw_response.latency
-        return _response(
+        response = _response(
             request,
             url=raw_response.url,
             status=raw_response.status,
             header_pairs=raw_response.headers,
             body=raw_response.body,
             protocol=raw_response.protocol,
+            flags=("download_stopped",) if raw_response.stopped else (),
         )
+        if stopped:
+            stop = stopped[0]
+            stop.response = response
+            if stop.fail:
+                raise stop
+        return response
 
     async def close(self) -> None:
         self._client = None
 
 
-def create_downloader(settings: Settings) -> Downloader:
+def create_downloader(settings: Settings, *, crawler: Crawler | None = None) -> Downloader:
     selected = str(settings.get("DOWNLOADER_BACKEND", "python")).strip().lower()
     if selected == "python":
-        return HttpxDownloader(settings)
+        return HttpxDownloader(settings, crawler=crawler)
     if selected == "rust":
-        return RustDownloader(settings)
+        return RustDownloader(settings, crawler=crawler)
     if selected == "auto":
         try:
-            return RustDownloader(settings)
+            return RustDownloader(settings, crawler=crawler)
         except BackendUnavailableError:
-            return HttpxDownloader(settings)
+            return HttpxDownloader(settings, crawler=crawler)
     raise ValueError(
         f"invalid downloader backend {selected!r}; expected 'python', 'rust', or 'auto'"
     )

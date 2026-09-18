@@ -11,7 +11,7 @@ from . import signals
 from ._scheduler import EngineScheduler, SchedulerQueueConfig
 from .backend import BackendUnavailableError
 from .downloader import Downloader
-from .exceptions import CloseSpider, DropItem, IgnoreRequest
+from .exceptions import CloseSpider, DontCloseSpider, DropItem, IgnoreRequest
 from .http import Request, Response
 from .job import (
     deserialize_request,
@@ -42,6 +42,12 @@ class CrawlResult:
 @dataclass(frozen=True, slots=True)
 class _StartFailure:
     exception: BaseException
+
+
+@dataclass(frozen=True, slots=True)
+class _OutputBatch:
+    outputs: list[object]
+    response: Response | None
 
 
 _START_DONE = object()
@@ -77,11 +83,12 @@ class CrawlEngine:
             raise ValueError("CONCURRENT_REQUESTS must be at least 1")
         self._internal_downloads = asyncio.Semaphore(self.concurrent_requests)
         self._close_event = asyncio.Event()
+        self._scheduler_wakeup = asyncio.Event()
         self._close_reason: str | None = None
         self.items: list[object] = []
 
     async def crawl(self) -> CrawlResult:
-        tasks: set[asyncio.Task[list[object]]] = set()
+        tasks: set[asyncio.Task[_OutputBatch]] = set()
         start_producer: asyncio.Task[None] | None = None
         next_start: asyncio.Task[object] | None = None
         close_waiter = asyncio.create_task(self._wait_for_close())
@@ -97,44 +104,78 @@ class CrawlEngine:
             start_producer = asyncio.create_task(self._produce_start_requests(start_queue))
             next_start = asyncio.create_task(start_queue.get())
 
-            while len(self.scheduler) or tasks or next_start is not None:
-                while len(tasks) < self.concurrent_requests:
-                    request = self.scheduler.pop()
-                    if request is None:
-                        break
-                    if not isinstance(request, Request):
-                        raise TypeError("scheduler returned an unsupported request type")
-                    tasks.add(asyncio.create_task(self._handle_request(request)))
+            while True:
+                while len(self.scheduler) or tasks or next_start is not None:
+                    while len(tasks) < self.concurrent_requests:
+                        request = self.scheduler.pop()
+                        if request is None:
+                            self.signals.send_sync(signals.scheduler_empty)
+                            break
+                        if not isinstance(request, Request):
+                            raise TypeError("scheduler returned an unsupported request type")
+                        tasks.add(asyncio.create_task(self._handle_request(request)))
 
-                waiters: set[asyncio.Task[object]] = set(tasks)
-                if next_start is not None:
-                    waiters.add(next_start)
-                waiters.add(close_waiter)
-                if not waiters:
+                    waiters: set[asyncio.Task[object]] = set(tasks)
+                    if next_start is not None:
+                        waiters.add(next_start)
+                    waiters.add(close_waiter)
+                    done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+
+                    if close_waiter in done:
+                        close_waiter.result()
+
+                    if next_start is not None and next_start in done:
+                        start_output = next_start.result()
+                        if isinstance(start_output, _StartFailure):
+                            if isinstance(start_output.exception, Exception):
+                                await self._report_spider_error(None, start_output.exception)
+                            raise start_output.exception
+                        if start_output is _START_DONE:
+                            next_start = None
+                        elif isinstance(start_output, Request):
+                            await self._schedule(start_output)
+                        else:
+                            await self._process_outputs([start_output])
+                        if start_output is not _START_DONE:
+                            next_start = asyncio.create_task(start_queue.get())
+
+                    completed_requests = tasks.intersection(done)
+                    tasks.difference_update(completed_requests)
+                    for task in completed_requests:
+                        batch = task.result()
+                        await self._process_outputs(batch.outputs, response=batch.response)
+
+                self._scheduler_wakeup.clear()
+                idle_responses = await self.signals.send_catch_log(
+                    signals.spider_idle,
+                    dont_log=(DontCloseSpider, CloseSpider),
+                    spider=self.spider,
+                )
+                idle_errors = [
+                    response.exception
+                    for _, response in idle_responses
+                    if isinstance(response, signals.SignalFailure)
+                ]
+                idle_close = next(
+                    (error for error in idle_errors if isinstance(error, CloseSpider)),
+                    None,
+                )
+                if idle_close is not None:
+                    reason = idle_close.reason
                     break
-                done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
-
+                if not any(isinstance(error, DontCloseSpider) for error in idle_errors):
+                    break
+                if len(self.scheduler):
+                    continue
+                wake_waiter = asyncio.create_task(self._scheduler_wakeup.wait())
+                done, _ = await asyncio.wait(
+                    {wake_waiter, close_waiter},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
                 if close_waiter in done:
                     close_waiter.result()
-
-                if next_start is not None and next_start in done:
-                    start_output = next_start.result()
-                    if isinstance(start_output, _StartFailure):
-                        raise start_output.exception
-                    if start_output is _START_DONE:
-                        next_start = None
-                    elif isinstance(start_output, Request):
-                        await self._schedule(start_output)
-                    else:
-                        await self._process_outputs([start_output])
-                    if start_output is not _START_DONE:
-                        next_start = asyncio.create_task(start_queue.get())
-
-                completed_requests = tasks.intersection(done)
-                tasks.difference_update(completed_requests)
-                for task in completed_requests:
-                    outputs = task.result()
-                    await self._process_outputs(outputs)
+                wake_waiter.cancel()
+                await asyncio.gather(wake_waiter, return_exceptions=True)
             if self._close_reason is not None:
                 reason = self._close_reason
         except CloseSpider as exception:
@@ -236,35 +277,44 @@ class CrawlEngine:
     async def _schedule(self, request: Request) -> bool:
         if not isinstance(request, Request):
             raise TypeError("spider output must contain Request objects or items")
+        scheduled_responses = self.signals.send_sync(
+            signals.request_scheduled,
+            dont_log=IgnoreRequest,
+            request=request,
+            spider=self.spider,
+        )
+        if any(
+            isinstance(response, signals.SignalFailure)
+            and isinstance(response.exception, IgnoreRequest)
+            for _, response in scheduled_responses
+        ):
+            self.stats.inc_value("scheduler/ignored")
+            return False
         inserted = self.scheduler.push_request(request)
         if inserted:
             self.stats.inc_value("scheduler/enqueued")
-            await self.signals.send(
-                signals.request_scheduled,
-                request=request,
-                spider=self.spider,
-            )
+            self._scheduler_wakeup.set()
         else:
             self.stats.inc_value("dupefilter/filtered")
-            await self.signals.send(
+            self.signals.send_sync(
                 signals.request_dropped,
                 request=request,
                 spider=self.spider,
             )
         return inserted
 
-    async def _handle_request(self, request: Request) -> list[object]:
+    async def _handle_request(self, request: Request) -> _OutputBatch:
         try:
             downloaded = await self._download(request)
         except CloseSpider:
             raise
         except IgnoreRequest:
-            return []
+            return _OutputBatch([], None)
         except Exception as exception:
-            return await self._run_errback(request, exception)
+            return _OutputBatch(await self._run_errback(request, exception), None)
 
         if isinstance(downloaded, Request):
-            return [downloaded]
+            return _OutputBatch([downloaded], None)
         response = downloaded
         await self.signals.send(
             signals.response_received,
@@ -272,7 +322,7 @@ class CrawlEngine:
             request=request,
             spider=self.spider,
         )
-        return await self._run_callback(request, response)
+        return _OutputBatch(await self._run_callback(request, response), response)
 
     async def _download(self, request: Request) -> Request | Response:
         return await self.downloader_middleware.download(request, self.downloader.fetch)
@@ -457,18 +507,18 @@ class CrawlEngine:
 
     async def _report_spider_error(
         self,
-        request: Request,
+        request: Request | None,
         exception: Exception,
         *,
         response: Response | None = None,
     ) -> list[object]:
         kwargs: dict[str, object] = {
             "failure": exception,
-            "request": request,
+            "response": response,
             "spider": self.spider,
         }
-        if response is not None:
-            kwargs["response"] = response
+        if request is not None:
+            kwargs["request"] = request
         exception_type = type(exception)
         exception_name = f"{exception_type.__module__}.{exception_type.__qualname__}"
         self.stats.inc_value("spider_exceptions/count")
@@ -476,7 +526,12 @@ class CrawlEngine:
         await self.signals.send(signals.spider_error, **kwargs)
         return []
 
-    async def _process_outputs(self, outputs: list[object]) -> None:
+    async def _process_outputs(
+        self,
+        outputs: list[object],
+        *,
+        response: Response | None = None,
+    ) -> None:
         for output in outputs:
             if output is None:
                 continue
@@ -489,12 +544,28 @@ class CrawlEngine:
                 await self.signals.send(
                     signals.item_dropped,
                     item=output,
+                    response=response,
                     exception=exception,
                     spider=self.spider,
                 )
                 continue
+            except Exception as exception:
+                self.spider.logger.exception("Error processing item")
+                await self.signals.send(
+                    signals.item_error,
+                    item=output,
+                    response=response,
+                    failure=exception,
+                    spider=self.spider,
+                )
+                continue
             self.items.append(item)
-            await self.signals.send(signals.item_scraped, item=item, spider=self.spider)
+            await self.signals.send(
+                signals.item_scraped,
+                item=item,
+                response=response,
+                spider=self.spider,
+            )
 
 
 class NativeCrawlEngine(CrawlEngine):
@@ -602,16 +673,53 @@ class NativeCrawlEngine(CrawlEngine):
             )
             self.crawler.native_download_slots = self.native_download_slots
 
-            tasks = {asyncio.create_task(self._worker()) for _ in range(self.concurrent_requests)}
-            tasks.add(asyncio.create_task(self._produce_native_start_requests()))
-            crawl_waiter = asyncio.gather(*tasks)
-            done, _ = await asyncio.wait(
-                {crawl_waiter, close_waiter},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if close_waiter in done:
-                close_waiter.result()
-            await crawl_waiter
+            first_pass = True
+            while True:
+                tasks = {
+                    asyncio.create_task(self._worker()) for _ in range(self.concurrent_requests)
+                }
+                if first_pass:
+                    tasks.add(asyncio.create_task(self._produce_native_start_requests()))
+                    first_pass = False
+                crawl_waiter = asyncio.gather(*tasks)
+                done, _ = await asyncio.wait(
+                    {crawl_waiter, close_waiter},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if close_waiter in done:
+                    close_waiter.result()
+                await crawl_waiter
+                self._scheduler_wakeup.clear()
+                idle_responses = await self.signals.send_catch_log(
+                    signals.spider_idle,
+                    dont_log=(DontCloseSpider, CloseSpider),
+                    spider=self.spider,
+                )
+                idle_errors = [
+                    response.exception
+                    for _, response in idle_responses
+                    if isinstance(response, signals.SignalFailure)
+                ]
+                idle_close = next(
+                    (error for error in idle_errors if isinstance(error, CloseSpider)),
+                    None,
+                )
+                if idle_close is not None:
+                    reason = idle_close.reason
+                    break
+                if not any(isinstance(error, DontCloseSpider) for error in idle_errors):
+                    break
+                if not self._scheduler_wakeup.is_set():
+                    wake_waiter = asyncio.create_task(self._scheduler_wakeup.wait())
+                    done, _ = await asyncio.wait(
+                        {wake_waiter, close_waiter},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if close_waiter in done:
+                        close_waiter.result()
+                    wake_waiter.cancel()
+                    await asyncio.gather(wake_waiter, return_exceptions=True)
+                crawl_waiter = None
             if self._close_reason is not None:
                 reason = self._close_reason
         except CloseSpider as exception:
@@ -668,7 +776,13 @@ class NativeCrawlEngine(CrawlEngine):
             self.scheduler.close_input()
 
     async def _worker(self) -> None:
-        while (request_id := await self.scheduler.next_request()) is not None:
+        while True:
+            request_id = await self.scheduler.next_request()
+            if request_id is None:
+                self.signals.send_sync(signals.scheduler_empty)
+                if self.scheduler.is_drained:
+                    return
+                continue
             try:
                 request = self._requests.pop(request_id)
             except KeyError as error:
@@ -679,8 +793,8 @@ class NativeCrawlEngine(CrawlEngine):
             storage = "disk" if request_id in self._persistent_request_ids else "memory"
             self.stats.inc_value(f"scheduler/dequeued/{storage}")
             try:
-                outputs = await self._handle_request(request)
-                await self._process_outputs(outputs)
+                batch = await self._handle_request(request)
+                await self._process_outputs(batch.outputs, response=batch.response)
             except CloseSpider:
                 self.scheduler.release(request_id)
                 raise
@@ -710,6 +824,19 @@ class NativeCrawlEngine(CrawlEngine):
     async def _schedule(self, request: Request) -> bool:
         if not isinstance(request, Request):
             raise TypeError("spider output must contain Request objects or items")
+        scheduled_responses = self.signals.send_sync(
+            signals.request_scheduled,
+            dont_log=IgnoreRequest,
+            request=request,
+            spider=self.spider,
+        )
+        if any(
+            isinstance(response, signals.SignalFailure)
+            and isinstance(response.exception, IgnoreRequest)
+            for _, response in scheduled_responses
+        ):
+            self.stats.inc_value("scheduler/ignored")
+            return False
         payload = None
         if self._job_dir is not None:
             try:
@@ -735,20 +862,16 @@ class NativeCrawlEngine(CrawlEngine):
         inserted = request_id is not None
         if inserted:
             self._requests[request_id] = request
+            self._scheduler_wakeup.set()
             self.stats.inc_value("scheduler/enqueued")
             storage = "disk" if self.scheduler.is_persistent(request_id) else "memory"
             self.stats.inc_value(f"scheduler/enqueued/{storage}")
             if storage == "disk":
                 self._persistent_request_ids.add(request_id)
-            await self.signals.send(
-                signals.request_scheduled,
-                request=request,
-                spider=self.spider,
-            )
             self.scheduler.activate(request_id)
         else:
             self.stats.inc_value("dupefilter/filtered")
-            await self.signals.send(
+            self.signals.send_sync(
                 signals.request_dropped,
                 request=request,
                 spider=self.spider,

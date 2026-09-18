@@ -33,12 +33,14 @@ from .downloadhandlers import (
 from .engine import CrawlResult, NativeCrawlEngine
 from .exceptions import (
     CloseSpider,
+    DontCloseSpider,
     DownloadError,
     DropItem,
     IgnoreRequest,
     NotConfigured,
     NotSupported,
     SpiderOxideError,
+    StopDownload,
 )
 from .extensions import ExtensionManager
 from .feedexport import (
@@ -145,6 +147,7 @@ __all__ = [
     "CrawlResult",
     "CsvItemExporter",
     "DownloadError",
+    "DontCloseSpider",
     "DownloadHandler",
     "DownloadHandlers",
     "Downloader",
@@ -227,6 +230,7 @@ __all__ = [
     "Spider",
     "SpiderOxideError",
     "StatsCollector",
+    "StopDownload",
     "StdoutFeedStorage",
     "TextResponse",
     "TakeFirst",

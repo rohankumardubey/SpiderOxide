@@ -28,3 +28,16 @@ class CloseSpider(SpiderOxideError):
     def __init__(self, reason: str = "cancelled") -> None:
         self.reason = reason
         super().__init__(reason)
+
+
+class DontCloseSpider(SpiderOxideError):
+    """Prevent a spider from closing while handling the idle signal."""
+
+
+class StopDownload(SpiderOxideError):
+    """Stop receiving a response body from a downloader signal handler."""
+
+    def __init__(self, *, fail: bool = True) -> None:
+        self.fail = fail
+        self.response: object | None = None
+        super().__init__()
