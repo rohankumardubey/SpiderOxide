@@ -29,8 +29,9 @@ class PythonScheduler:
         method: str = "GET",
         body: bytes = b"",
         priority: int = 0,
+        verbatim_url: bool = False,
     ) -> bool:
-        if self._dupe_filter.seen(url, method, body):
+        if self._dupe_filter.seen(url, method, body, verbatim_url):
             return False
         self._enqueue(url, method, body, priority)
         return True
@@ -41,6 +42,7 @@ class PythonScheduler:
         method: str = "GET",
         body: bytes = b"",
         priority: int = 0,
+        verbatim_url: bool = False,
     ) -> bool:
         self._enqueue(url, method, body, priority)
         return True

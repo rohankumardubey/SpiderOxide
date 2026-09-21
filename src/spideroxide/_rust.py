@@ -18,8 +18,15 @@ def _native_requests(requests: object) -> list[tuple[str, str, bytes, int]]:
     ]
 
 
-def fingerprint(url: str, method: str = "GET", body: bytes = b"") -> bytes:
-    return _fingerprint(url, method, body)
+def fingerprint(
+    url: str,
+    method: str = "GET",
+    body: bytes = b"",
+    headers: object = (),
+    keep_fragments: bool = False,
+    verbatim_url: bool = False,
+) -> bytes:
+    return _fingerprint(url, method, body, headers, keep_fragments, verbatim_url)
 
 
 def fingerprint_batch(requests: object) -> list[bytes]:
@@ -30,8 +37,14 @@ class RustDupeFilter:
     def __init__(self) -> None:
         self._implementation = _NativeDupeFilter()
 
-    def seen(self, url: str, method: str = "GET", body: bytes = b"") -> bool:
-        return bool(self._implementation.seen(url, method, body))
+    def seen(
+        self,
+        url: str,
+        method: str = "GET",
+        body: bytes = b"",
+        verbatim_url: bool = False,
+    ) -> bool:
+        return bool(self._implementation.seen(url, method, body, verbatim_url))
 
     def seen_batch(self, requests: object) -> list[bool]:
         return list(self._implementation.seen_batch(_native_requests(requests)))

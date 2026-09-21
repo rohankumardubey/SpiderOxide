@@ -9,8 +9,8 @@ use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use tokio::sync::Notify;
 
-use crate::fingerprint_bytes;
 use crate::job::PersistentJobStore;
+use crate::{RequestFingerprint, fingerprint_bytes};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum QueueOrder {
@@ -171,7 +171,7 @@ impl CoordinatorQueues {
 }
 
 struct CoordinatorState {
-    fingerprints: HashSet<[u8; 32]>,
+    fingerprints: HashSet<RequestFingerprint>,
     staged: HashMap<u64, StagedQueueEntry>,
     queues: CoordinatorQueues,
     active: HashSet<u64>,
@@ -333,7 +333,8 @@ impl NativeCrawlCoordinator {
         priority = "0",
         filter_duplicates = true,
         payload = None,
-        is_start_request = false
+        is_start_request = false,
+        verbatim_url = false
     ))]
     #[allow(clippy::too_many_arguments)]
     fn schedule(
@@ -345,8 +346,9 @@ impl NativeCrawlCoordinator {
         filter_duplicates: bool,
         payload: Option<&[u8]>,
         is_start_request: bool,
+        verbatim_url: bool,
     ) -> PyResult<Option<u64>> {
-        let fingerprint = fingerprint_bytes(url, method, body)?;
+        let fingerprint = fingerprint_bytes(url, method, body, &[], false, verbatim_url)?;
         let priority = BigInt::from_str(priority)
             .map_err(|_| PyValueError::new_err("priority must be an integer"))?;
         let request_id;
@@ -423,6 +425,23 @@ impl NativeCrawlCoordinator {
             state.empty_reported = false;
         }
         self.notify.notify_waiters();
+        Ok(())
+    }
+
+    #[pyo3(signature = (url, method, body, verbatim_url = false))]
+    fn restore_fingerprint(
+        &self,
+        url: &str,
+        method: &str,
+        body: &[u8],
+        verbatim_url: bool,
+    ) -> PyResult<()> {
+        let fingerprint = fingerprint_bytes(url, method, body, &[], false, verbatim_url)?;
+        let mut state = self.lock_state()?;
+        if let Some(store) = state.job_store.as_mut() {
+            store.remember_fingerprint(&fingerprint)?;
+        }
+        state.fingerprints.insert(fingerprint);
         Ok(())
     }
 

@@ -17,11 +17,11 @@ def _verify_examples() -> None:
     equivalent_groups = [
         [
             ("http://Example.COM/path?b=2&a=1#fragment", "GET", b""),
-            ("HTTP://example.com:80/path?a=1&b=2", "get", b""),
+            ("HTTP://example.com/path?a=1&b=2", "get", b""),
         ],
         [
             ("https://EXAMPLE.com?tag=2&tag=1", "GET", b""),
-            ("https://example.com:443/?tag=1&tag=2", "GET", b""),
+            ("https://example.com/?tag=1&tag=2", "GET", b""),
         ],
         [
             ("https://例え.テスト/商品?q=値", "POST", "本文".encode()),

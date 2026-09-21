@@ -5,6 +5,7 @@ mod cookies;
 mod depth;
 mod downloader;
 mod engine;
+mod fingerprints;
 mod httpcache;
 mod job;
 mod links;
@@ -18,137 +19,27 @@ use cookies::NativeCookieJar;
 use depth::{NativeDepthDecision, NativeDepthPolicy};
 use downloader::{NativeHttpClient, NativeHttpResponse};
 use engine::NativeCrawlCoordinator;
+use fingerprints::{
+    RequestFingerprint, fingerprint, fingerprint_batch, fingerprint_bytes, py_canonicalize_url,
+};
 use httpcache::NativeHttpCacheStore;
 use links::extract_link_candidates;
 use media::NativeMediaStore;
 use policy::{NativePolicyRuntime, NativeRetryDecision};
-use pyo3::exceptions::{PyOverflowError, PyValueError};
+use pyo3::exceptions::PyOverflowError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
 use robots::{NativeRobotParser, NativeRobotsDecision, NativeRobotsRuntime};
 use runtime::shutdown_async_runtime;
-use sha2::{Digest, Sha256};
 use slots::{NativeDownloadSlotLease, NativeDownloadSlotManager};
-use url::{Url, form_urlencoded};
 
 pyo3::create_exception!(_native, NativeDownloadError, pyo3::exceptions::PyException);
 
 type RequestTuple = (String, String, Vec<u8>, i64);
 
-fn quote_hostless_path(path: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut quoted = String::with_capacity(path.len());
-    for byte in path.bytes() {
-        if byte.is_ascii_alphanumeric() || b"/:@-._~!$&'()*+,;=%".contains(&byte) {
-            quoted.push(char::from(byte));
-        } else {
-            quoted.push('%');
-            quoted.push(char::from(HEX[usize::from(byte >> 4)]));
-            quoted.push(char::from(HEX[usize::from(byte & 0x0f)]));
-        }
-    }
-    quoted
-}
-
-fn canonicalize_url(url: &str) -> PyResult<String> {
-    let mut parsed =
-        Url::parse(url).map_err(|error| PyValueError::new_err(format!("invalid URL: {error}")))?;
-    let scheme = parsed.scheme().to_owned();
-    let has_host = parsed.host_str().is_some();
-    if !has_host {
-        let scheme_end = url
-            .find(':')
-            .ok_or_else(|| PyValueError::new_err("URL must include a scheme"))?;
-        let without_fragment = &url[..url.find('#').unwrap_or(url.len())];
-        let remainder = &without_fragment[scheme_end + 1..];
-        let (path, query) = remainder
-            .split_once('?')
-            .map_or((remainder, None), |(path, query)| (path, Some(query)));
-        let mut pairs: Vec<(String, String)> = query
-            .map(|value| {
-                form_urlencoded::parse(value.as_bytes())
-                    .map(|(key, value)| (key.into_owned(), value.into_owned()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        pairs.sort();
-        let canonical_query = if pairs.is_empty() {
-            None
-        } else {
-            let mut serializer = form_urlencoded::Serializer::new(String::new());
-            serializer.extend_pairs(pairs);
-            Some(serializer.finish())
-        };
-        let mut canonical = format!("{}:{}", scheme.to_lowercase(), quote_hostless_path(path));
-        if let Some(query) = canonical_query {
-            canonical.push('?');
-            canonical.push_str(&query);
-        }
-        return Ok(canonical);
-    }
-    parsed.set_fragment(None);
-    if (scheme == "http" && parsed.port() == Some(80))
-        || (scheme == "https" && parsed.port() == Some(443))
-    {
-        parsed
-            .set_port(None)
-            .map_err(|_| PyValueError::new_err("unable to normalize URL port"))?;
-    }
-    if has_host && parsed.path().is_empty() {
-        parsed.set_path("/");
-    }
-
-    let mut pairs: Vec<(String, String)> = parsed
-        .query_pairs()
-        .map(|(key, value)| (key.into_owned(), value.into_owned()))
-        .collect();
-    pairs.sort();
-    if pairs.is_empty() {
-        parsed.set_query(None);
-    } else {
-        let mut serializer = form_urlencoded::Serializer::new(String::new());
-        serializer.extend_pairs(pairs);
-        parsed.set_query(Some(&serializer.finish()));
-    }
-    Ok(parsed.into())
-}
-
-fn fingerprint_bytes(url: &str, method: &str, body: &[u8]) -> PyResult<[u8; 32]> {
-    let normalized_method = method.trim().to_uppercase();
-    let canonical_url = canonicalize_url(url)?;
-    let mut digest = Sha256::new();
-    digest.update(normalized_method.as_bytes());
-    digest.update([0]);
-    digest.update(canonical_url.as_bytes());
-    digest.update([0]);
-    digest.update(body);
-    Ok(digest.finalize().into())
-}
-
-#[pyfunction]
-fn fingerprint<'py>(
-    py: Python<'py>,
-    url: &str,
-    method: &str,
-    body: &[u8],
-) -> PyResult<Bound<'py, PyBytes>> {
-    Ok(PyBytes::new(py, &fingerprint_bytes(url, method, body)?))
-}
-
-#[pyfunction]
-fn fingerprint_batch(py: Python<'_>, requests: Vec<RequestTuple>) -> PyResult<Vec<Py<PyBytes>>> {
-    requests
-        .iter()
-        .map(|(url, method, body, _)| {
-            let value = fingerprint_bytes(url, method, body)?;
-            Ok(PyBytes::new(py, &value).unbind())
-        })
-        .collect()
-}
-
 #[pyclass(module = "spideroxide._native")]
 struct RustDupeFilter {
-    fingerprints: HashSet<[u8; 32]>,
+    fingerprints: HashSet<RequestFingerprint>,
 }
 
 #[pymethods]
@@ -160,16 +51,29 @@ impl RustDupeFilter {
         }
     }
 
-    #[pyo3(signature = (url, method = None, body = None))]
-    fn seen(&mut self, url: &str, method: Option<&str>, body: Option<&[u8]>) -> PyResult<bool> {
-        let value = fingerprint_bytes(url, method.unwrap_or("GET"), body.unwrap_or_default())?;
+    #[pyo3(signature = (url, method = None, body = None, verbatim_url = false))]
+    fn seen(
+        &mut self,
+        url: &str,
+        method: Option<&str>,
+        body: Option<&[u8]>,
+        verbatim_url: bool,
+    ) -> PyResult<bool> {
+        let value = fingerprint_bytes(
+            url,
+            method.unwrap_or("GET"),
+            body.unwrap_or_default(),
+            &[],
+            false,
+            verbatim_url,
+        )?;
         Ok(!self.fingerprints.insert(value))
     }
 
     fn seen_batch(&mut self, requests: Vec<RequestTuple>) -> PyResult<Vec<bool>> {
         requests
             .iter()
-            .map(|(url, method, body, _)| self.seen(url, Some(method), Some(body)))
+            .map(|(url, method, body, _)| self.seen(url, Some(method), Some(body), false))
             .collect()
     }
 
@@ -250,15 +154,20 @@ impl PartialOrd for QueueEntry {
 
 #[pyclass(module = "spideroxide._native")]
 struct RustScheduler {
-    fingerprints: HashSet<[u8; 32]>,
+    fingerprints: HashSet<RequestFingerprint>,
     queue: BinaryHeap<QueueEntry>,
     next_sequence: u64,
 }
 
 impl RustScheduler {
-    fn push_inner(&mut self, request: RequestTuple, filter_duplicates: bool) -> PyResult<bool> {
+    fn push_inner(
+        &mut self,
+        request: RequestTuple,
+        filter_duplicates: bool,
+        verbatim_url: bool,
+    ) -> PyResult<bool> {
         let (url, method, body, priority) = request;
-        let value = fingerprint_bytes(&url, &method, &body)?;
+        let value = fingerprint_bytes(&url, &method, &body, &[], false, verbatim_url)?;
         if filter_duplicates && !self.fingerprints.insert(value) {
             return Ok(false);
         }
@@ -297,13 +206,20 @@ impl RustScheduler {
         }
     }
 
-    #[pyo3(signature = (url, method = None, body = None, priority = 0))]
+    #[pyo3(signature = (
+        url,
+        method = None,
+        body = None,
+        priority = 0,
+        verbatim_url = false
+    ))]
     fn push(
         &mut self,
         url: String,
         method: Option<String>,
         body: Option<Vec<u8>>,
         priority: i64,
+        verbatim_url: bool,
     ) -> PyResult<bool> {
         self.push_inner(
             (
@@ -313,16 +229,24 @@ impl RustScheduler {
                 priority,
             ),
             true,
+            verbatim_url,
         )
     }
 
-    #[pyo3(signature = (url, method = None, body = None, priority = 0))]
+    #[pyo3(signature = (
+        url,
+        method = None,
+        body = None,
+        priority = 0,
+        verbatim_url = false
+    ))]
     fn push_unchecked(
         &mut self,
         url: String,
         method: Option<String>,
         body: Option<Vec<u8>>,
         priority: i64,
+        verbatim_url: bool,
     ) -> PyResult<bool> {
         self.push_inner(
             (
@@ -332,13 +256,14 @@ impl RustScheduler {
                 priority,
             ),
             false,
+            verbatim_url,
         )
     }
 
     fn push_batch(&mut self, requests: Vec<RequestTuple>) -> PyResult<Vec<bool>> {
         requests
             .into_iter()
-            .map(|request| self.push_inner(request, true))
+            .map(|request| self.push_inner(request, true, false))
             .collect()
     }
 
@@ -367,6 +292,7 @@ impl RustScheduler {
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(fingerprint, module)?)?;
     module.add_function(wrap_pyfunction!(fingerprint_batch, module)?)?;
+    module.add_function(wrap_pyfunction!(py_canonicalize_url, module)?)?;
     module.add_function(wrap_pyfunction!(extract_link_candidates, module)?)?;
     module.add_function(wrap_pyfunction!(shutdown_async_runtime, module)?)?;
     module.add(

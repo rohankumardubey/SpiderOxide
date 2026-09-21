@@ -634,8 +634,16 @@ class NativeCrawlEngine(CrawlEngine):
             self._unserializable_logged = False
             recovered = coordinator.take_recovered()
             for request_id, payload in recovered:
-                self._requests[request_id] = deserialize_request(payload, spider)
+                request = deserialize_request(payload, spider)
+                self._requests[request_id] = request
                 self._persistent_request_ids.add(request_id)
+                if not request.dont_filter:
+                    coordinator.restore_fingerprint(
+                        request.url,
+                        request.method,
+                        request.body,
+                        bool(request.meta.get("verbatim_url", False)),
+                    )
             if recovered:
                 self.stats.inc_value("scheduler/recovered", len(recovered))
                 spider.logger.info("Resuming crawl (%d requests scheduled)", len(recovered))
@@ -858,6 +866,7 @@ class NativeCrawlEngine(CrawlEngine):
             not request.dont_filter,
             payload,
             bool(request.meta.get("is_start_request", False)),
+            bool(request.meta.get("verbatim_url", False)),
         )
         inserted = request_id is not None
         if inserted:
