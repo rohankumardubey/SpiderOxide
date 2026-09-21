@@ -14,8 +14,14 @@ class PythonDupeFilter:
         url: str,
         method: str = "GET",
         body: bytes = b"",
+        verbatim_url: bool = False,
     ) -> bool:
-        request_fingerprint = fingerprint(url, method, body)
+        request_fingerprint = fingerprint(
+            url,
+            method,
+            body,
+            verbatim_url=verbatim_url,
+        )
         if request_fingerprint in self._fingerprints:
             return True
         self._fingerprints.add(request_fingerprint)

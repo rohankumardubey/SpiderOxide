@@ -43,8 +43,8 @@ Scrapy.
 
 ## Features
 
-* Deterministic SHA-256 request fingerprints
-* URL canonicalization with duplicate query parameter support
+* Scrapy-compatible SHA-1 request fingerprints with optional headers and fragments
+* W3lib-compatible URL canonicalization, including repeated query fields and IDN hosts
 * In-memory duplicate filtering
 * Stable priority scheduling
 * FIFO ordering for requests with equal priority
@@ -873,6 +873,13 @@ assert scheduler.push_request(request) is True
 assert scheduler.pop() is request
 ```
 
+Fingerprints use Scrapy's deterministic SHA-1 JSON framing over the uppercase method, canonical
+URL, body, and explicitly selected headers. Pass `include_headers=[...]` to include case-insensitive
+request headers or `keep_fragments=True` when fragments identify distinct resources. Native and
+Python duplicate filters and schedulers apply the same contract. A request with
+`meta["verbatim_url"] = True` bypasses URL canonicalization, preserving query order and fragments
+exactly.
+
 Python is the default backend. Set `SCRAPY_RUST_BACKEND` to `rust` to require the native backend,
 or to `auto` to use Rust when it is available and Python otherwise.
 
@@ -889,7 +896,8 @@ spider and extension layer while making Rust the required production core.
 
 The validation suite compares:
 
-* fingerprints byte for byte
+* Scrapy fingerprint vectors, included headers, fragments, verbatim URLs, and URL edge cases
+* Python and Rust fingerprints byte for byte
 * duplicate filter decisions
 * scheduler insertion decisions
 * complete scheduler output order
@@ -1080,10 +1088,9 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include complete fingerprint edge-case parity, project and command-line tooling,
-remaining spider contracts, SOCKS proxy support, add-on and service APIs, and Twisted
-interoperability. Exact third-party component compatibility and production hardening also remain
-ongoing work.
+Known gaps include project and command-line tooling, remaining spider contracts, SOCKS proxy
+support, add-on and service APIs, and Twisted interoperability. Exact third-party component
+compatibility and production hardening also remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,
 callback, middleware, pipeline, and extension layer. The Python core backend will remain available

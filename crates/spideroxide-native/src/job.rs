@@ -9,7 +9,9 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::{PyErr, PyResult};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
-const SCHEMA_VERSION: i64 = 2;
+use crate::RequestFingerprint;
+
+const SCHEMA_VERSION: i64 = 3;
 
 pub(crate) struct PersistedRequest {
     pub(crate) request_id: u64,
@@ -96,7 +98,7 @@ impl PersistentJobStore {
                     payload BLOB NOT NULL
                 );
                 INSERT OR IGNORE INTO metadata(key, value)
-                VALUES ('schema_version', 2);
+                VALUES ('schema_version', 3);
                 ",
             )
             .map_err(|error| job_error("unable to initialize persistent job database", error))?;
@@ -108,20 +110,29 @@ impl PersistentJobStore {
                 |row| row.get(0),
             )
             .map_err(|error| job_error("unable to read persistent job schema", error))?;
-        if version == 1 {
+        if matches!(version, 1 | 2) {
             let transaction = connection
                 .transaction()
                 .map_err(|error| job_error("unable to start persistent job migration", error))?;
-            transaction
-                .execute_batch(
-                    "
+            if version == 1 {
+                transaction
+                    .execute_batch(
+                        "
                     ALTER TABLE requests
                     ADD COLUMN is_start INTEGER NOT NULL DEFAULT 0
                     CHECK (is_start IN (0, 1));
-                    UPDATE metadata SET value = 2 WHERE key = 'schema_version';
+                    ",
+                    )
+                    .map_err(|error| job_error("unable to migrate persistent job schema", error))?;
+            }
+            transaction
+                .execute_batch(
+                    "
+                    DELETE FROM fingerprints;
+                    UPDATE metadata SET value = 3 WHERE key = 'schema_version';
                     ",
                 )
-                .map_err(|error| job_error("unable to migrate persistent job schema", error))?;
+                .map_err(|error| job_error("unable to migrate request fingerprints", error))?;
             transaction
                 .commit()
                 .map_err(|error| job_error("unable to commit persistent job migration", error))?;
@@ -174,7 +185,7 @@ impl PersistentJobStore {
         .collect()
     }
 
-    pub(crate) fn load_fingerprints(&self) -> PyResult<HashSet<[u8; 32]>> {
+    pub(crate) fn load_fingerprints(&self) -> PyResult<HashSet<RequestFingerprint>> {
         let mut statement = self
             .connection
             .prepare("SELECT fingerprint FROM fingerprints")
@@ -186,9 +197,9 @@ impl PersistentJobStore {
         for row in rows {
             let value =
                 row.map_err(|error| job_error("unable to decode persisted fingerprint", error))?;
-            let fingerprint: [u8; 32] = value.try_into().map_err(|value: Vec<u8>| {
+            let fingerprint: RequestFingerprint = value.try_into().map_err(|value: Vec<u8>| {
                 PyRuntimeError::new_err(format!(
-                    "persistent job store contains a {} byte fingerprint; expected 32",
+                    "persistent job store contains a {} byte fingerprint; expected 20",
                     value.len()
                 ))
             })?;
@@ -197,7 +208,10 @@ impl PersistentJobStore {
         Ok(fingerprints)
     }
 
-    fn insert_fingerprint(transaction: &Transaction<'_>, fingerprint: &[u8; 32]) -> PyResult<bool> {
+    fn insert_fingerprint(
+        transaction: &Transaction<'_>,
+        fingerprint: &RequestFingerprint,
+    ) -> PyResult<bool> {
         let inserted = transaction
             .execute(
                 "INSERT OR IGNORE INTO fingerprints(fingerprint) VALUES (?1)",
@@ -207,13 +221,26 @@ impl PersistentJobStore {
         Ok(inserted == 1)
     }
 
+    pub(crate) fn remember_fingerprint(
+        &mut self,
+        fingerprint: &RequestFingerprint,
+    ) -> PyResult<()> {
+        self.connection
+            .execute(
+                "INSERT OR IGNORE INTO fingerprints(fingerprint) VALUES (?1)",
+                params![fingerprint.as_slice()],
+            )
+            .map_err(|error| job_error("unable to restore request fingerprint", error))?;
+        Ok(())
+    }
+
     pub(crate) fn schedule(
         &mut self,
         request_id: u64,
         sequence: u64,
         priority: &str,
         payload: Option<&[u8]>,
-        fingerprint: Option<&[u8; 32]>,
+        fingerprint: Option<&RequestFingerprint>,
         is_start_request: bool,
     ) -> PyResult<bool> {
         let transaction = self

@@ -1,66 +1,34 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable, Sequence
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+
+from w3lib.url import canonicalize_url
 
 RequestData = tuple[str, str, bytes, int]
-
-
-def canonicalize_url(url: str) -> str:
-    """Canonicalize a URL using the benchmark's deliberately small specification."""
-    parts = urlsplit(url)
-    scheme = parts.scheme.lower()
-    hostname = parts.hostname
-    if not scheme:
-        raise ValueError(f"URL must include a scheme: {url!r}")
-
-    query_pairs = parse_qsl(parts.query, keep_blank_values=True)
-    query_pairs.sort()
-    query = urlencode(query_pairs)
-    if hostname is None:
-        path = quote(parts.path, safe="/:@-._~!$&'()*+,;=%")
-        return urlunsplit((scheme, parts.netloc, path, query, ""))
-
-    host = hostname.encode("idna").decode("ascii").lower()
-    if ":" in host:
-        host = f"[{host}]"
-
-    try:
-        port = parts.port
-    except ValueError as exc:
-        raise ValueError(f"invalid port in URL: {url!r}") from exc
-
-    if port is not None and not (
-        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
-    ):
-        host = f"{host}:{port}"
-
-    userinfo = ""
-    if parts.username is not None:
-        userinfo = parts.username
-        if parts.password is not None:
-            userinfo += f":{parts.password}"
-        userinfo += "@"
-
-    path = quote(parts.path or "/", safe="/:@-._~!$&'()*+,;=%")
-    return urlunsplit((scheme, userinfo + host, path, query, ""))
+FingerprintHeaders = Sequence[tuple[bytes, Sequence[bytes]]]
 
 
 def fingerprint(
     url: str,
     method: str = "GET",
     body: bytes = b"",
+    headers: FingerprintHeaders = (),
+    keep_fragments: bool = False,
+    verbatim_url: bool = False,
 ) -> bytes:
-    normalized_method = method.strip().upper().encode("utf-8")
-    canonical_url = canonicalize_url(url).encode("utf-8")
-    digest = hashlib.sha256()
-    digest.update(normalized_method)
-    digest.update(b"\0")
-    digest.update(canonical_url)
-    digest.update(b"\0")
-    digest.update(body)
-    return digest.digest()
+    normalized_headers = {
+        name.hex(): [value.hex() for value in values] for name, values in sorted(headers) if values
+    }
+    fingerprint_data = {
+        "method": method.upper(),
+        "url": url if verbatim_url else canonicalize_url(url, keep_fragments=keep_fragments),
+        "body": body.hex(),
+        "headers": normalized_headers,
+    }
+    fingerprint_json = json.dumps(fingerprint_data, sort_keys=True)
+    return hashlib.sha1(fingerprint_json.encode()).digest()  # noqa: S324
 
 
 def fingerprint_batch(requests: Iterable[Sequence[object]]) -> list[bytes]:

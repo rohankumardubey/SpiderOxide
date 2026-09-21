@@ -106,6 +106,16 @@ class UnserializableSpider(Spider):
         yield Request("https://example.test/transient", callback=local_callback)
 
 
+class UnfilteredResumeSpider(Spider):
+    name = "unfiltered-resume"
+
+    async def start(self):
+        if self.state.get("seeded"):
+            return
+        self.state["seeded"] = True
+        yield Request("https://example.test/unfiltered", dont_filter=True)
+
+
 class CrashSpider(Spider):
     name = "crash"
 
@@ -357,6 +367,36 @@ async def _verify_unserializable_fallback(directory: Path) -> None:
     assert result.stats.get("scheduler/recovered") is None
 
 
+async def _verify_unfiltered_recovery(directory: Path) -> None:
+    blocking = BlockingDownloader()
+    crawler = Crawler(
+        UnfilteredResumeSpider,
+        {
+            "CONCURRENT_REQUESTS": 1,
+            "ENGINE_BACKEND": "rust",
+            "JOBDIR": directory,
+        },
+        downloader=blocking,
+    )
+    await _cancel_crawl(crawler, blocking, 1)
+
+    recording = RecordingDownloader()
+    resumed = Crawler(
+        UnfilteredResumeSpider,
+        {
+            "CONCURRENT_REQUESTS": 1,
+            "ENGINE_BACKEND": "rust",
+            "JOBDIR": directory,
+        },
+        downloader=recording,
+    )
+    await resumed.crawl()
+    assert [request.url for request in recording.requests] == ["https://example.test/unfiltered"]
+    with sqlite3.connect(directory / "job.sqlite3") as connection:
+        fingerprints = connection.execute("SELECT COUNT(*) FROM fingerprints").fetchone()
+    assert fingerprints == (0,)
+
+
 async def _run_crash_worker(directory: Path) -> None:
     await Crawler(
         CrashSpider,
@@ -490,8 +530,44 @@ def _verify_schema_migration(directory: Path) -> None:
             "SELECT value FROM metadata WHERE key = 'schema_version'"
         ).fetchone()
         columns = {row[1] for row in connection.execute("PRAGMA table_info(requests)").fetchall()}
-    assert version == (2,)
+    assert version == (3,)
     assert "is_start" in columns
+
+
+def _verify_fingerprint_schema_migration(directory: Path) -> None:
+    directory.mkdir()
+    with sqlite3.connect(directory / "job.sqlite3") as connection:
+        connection.executescript(
+            """
+            CREATE TABLE metadata (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            );
+            CREATE TABLE fingerprints (
+                fingerprint BLOB PRIMARY KEY
+            );
+            CREATE TABLE requests (
+                request_id INTEGER PRIMARY KEY,
+                sequence INTEGER NOT NULL UNIQUE,
+                priority TEXT NOT NULL,
+                is_start INTEGER NOT NULL CHECK (is_start IN (0, 1)),
+                payload BLOB NOT NULL
+            );
+            INSERT INTO metadata(key, value) VALUES ('schema_version', 2);
+            INSERT INTO fingerprints(fingerprint) VALUES (zeroblob(32));
+            """
+        )
+
+    coordinator = NativeCrawlCoordinator(1, 1, str(directory))
+    coordinator.close()
+
+    with sqlite3.connect(directory / "job.sqlite3") as connection:
+        version = connection.execute(
+            "SELECT value FROM metadata WHERE key = 'schema_version'"
+        ).fetchone()
+        fingerprints = connection.execute("SELECT COUNT(*) FROM fingerprints").fetchone()
+    assert version == (3,)
+    assert fingerprints == (0,)
 
 
 async def _verify() -> None:
@@ -502,6 +578,8 @@ async def _verify() -> None:
         await _verify_crawl_resume(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="spideroxide-unserializable-") as temporary:
         await _verify_unserializable_fallback(Path(temporary))
+    with tempfile.TemporaryDirectory(prefix="spideroxide-unfiltered-resume-") as temporary:
+        await _verify_unfiltered_recovery(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="spideroxide-hard-crash-") as temporary:
         await _verify_hard_crash(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="spideroxide-close-resume-") as temporary:
@@ -512,6 +590,8 @@ async def _verify() -> None:
         _verify_schema_rejection(Path(temporary))
     with tempfile.TemporaryDirectory(prefix="spideroxide-schema-migration-") as temporary:
         _verify_schema_migration(Path(temporary) / "job")
+    with tempfile.TemporaryDirectory(prefix="spideroxide-fingerprint-migration-") as temporary:
+        _verify_fingerprint_schema_migration(Path(temporary) / "job")
 
 
 if __name__ == "__main__":

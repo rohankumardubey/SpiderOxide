@@ -21,7 +21,7 @@ class BackendUnavailableError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class BackendImplementation:
     name: Literal["python", "rust"]
-    fingerprint: Callable[[str, str, bytes], bytes]
+    fingerprint: Callable[..., bytes]
     fingerprint_batch: Callable[[object], list[bytes]]
     dupe_filter_type: type
     scheduler_type: type
