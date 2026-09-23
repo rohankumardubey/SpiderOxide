@@ -51,18 +51,23 @@ fn content_encodings(headers: &HeaderMap) -> Vec<String> {
         .collect()
 }
 
-fn response_reader(response: Response, encodings: &[String]) -> ResponseReader {
+fn response_reader(
+    response: Response,
+    encodings: &[String],
+    decode_response: bool,
+) -> ResponseReader {
     let stream = response.bytes_stream().map_err(io::Error::other);
     let mut reader: ResponseReader = Box::pin(StreamReader::new(stream));
-    if !encodings.iter().all(|value| {
-        matches!(
-            value.as_str(),
-            "br" | "deflate" | "gzip" | "identity" | "zstd"
-        )
-    }) {
+    if !decode_response
+        || !encodings.iter().all(|value| {
+            matches!(
+                value.as_str(),
+                "br" | "deflate" | "gzip" | "identity" | "zstd"
+            )
+        })
+    {
         return reader;
     }
-
     for encoding in encodings.iter().rev() {
         reader = match encoding.as_str() {
             "br" => Box::pin(BrotliDecoder::new(BufReader::new(reader))),
@@ -100,27 +105,30 @@ fn call_bytes_callback(callback: Option<&Py<PyAny>>, data: &[u8]) -> PyResult<bo
     Python::attach(|py| callback.call1(py, (PyBytes::new(py, data),))?.extract(py))
 }
 
-fn client_builder(user_agent: Option<&str>) -> ClientBuilder {
-    let mut default_headers = HeaderMap::new();
-    default_headers.insert(
-        ACCEPT_ENCODING,
-        HeaderValue::from_static("gzip, br, deflate, zstd"),
-    );
+fn client_builder(user_agent: Option<&str>, transport_defaults: bool) -> ClientBuilder {
     let mut builder = Client::builder()
-        .default_headers(default_headers)
         .redirect(redirect::Policy::none())
         .no_proxy();
-    if let Some(user_agent) = user_agent.filter(|value| !value.is_empty()) {
-        builder = builder.user_agent(user_agent);
+    if transport_defaults {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            ACCEPT_ENCODING,
+            HeaderValue::from_static("gzip, br, deflate, zstd"),
+        );
+        builder = builder.default_headers(default_headers);
+        if let Some(user_agent) = user_agent.filter(|value| !value.is_empty()) {
+            builder = builder.user_agent(user_agent);
+        }
     }
     builder
 }
 
 fn build_client(
     user_agent: Option<&str>,
+    transport_defaults: bool,
     proxy: Option<(&str, Option<&[u8]>)>,
 ) -> PyResult<Client> {
-    let mut builder = client_builder(user_agent);
+    let mut builder = client_builder(user_agent, transport_defaults);
     if let Some((url, authorization)) = proxy {
         let mut configured = Proxy::all(url)
             .map_err(|error| download_error(format!("invalid proxy URL: {error}")))?;
@@ -200,6 +208,7 @@ pub(crate) struct NativeHttpClient {
     client: Client,
     proxy_clients: Mutex<HashMap<ProxyClientKey, Client>>,
     user_agent: Option<String>,
+    transport_defaults: bool,
     max_size: usize,
     timeout: Duration,
 }
@@ -227,7 +236,11 @@ impl NativeHttpClient {
         if let Some(client) = clients.get(&key) {
             return Ok(client.clone());
         }
-        let client = build_client(self.user_agent.as_deref(), Some((proxy, authorization)))?;
+        let client = build_client(
+            self.user_agent.as_deref(),
+            self.transport_defaults,
+            Some((proxy, authorization)),
+        )?;
         clients.insert(key, client.clone());
         Ok(client)
     }
@@ -236,8 +249,18 @@ impl NativeHttpClient {
 #[pymethods]
 impl NativeHttpClient {
     #[new]
-    #[pyo3(signature = (timeout = 180.0, max_size = 0, user_agent = None))]
-    fn new(timeout: f64, max_size: usize, user_agent: Option<&str>) -> PyResult<Self> {
+    #[pyo3(signature = (
+        timeout = 180.0,
+        max_size = 0,
+        user_agent = None,
+        transport_defaults = true
+    ))]
+    fn new(
+        timeout: f64,
+        max_size: usize,
+        user_agent: Option<&str>,
+        transport_defaults: bool,
+    ) -> PyResult<Self> {
         let timeout = Duration::try_from_secs_f64(timeout).map_err(|_| {
             PyValueError::new_err("DOWNLOAD_TIMEOUT must be a positive finite number")
         })?;
@@ -248,11 +271,12 @@ impl NativeHttpClient {
         }
 
         let user_agent = user_agent.map(str::to_owned);
-        let client = build_client(user_agent.as_deref(), None)?;
+        let client = build_client(user_agent.as_deref(), transport_defaults, None)?;
         Ok(Self {
             client,
             proxy_clients: Mutex::new(HashMap::new()),
             user_agent,
+            transport_defaults,
             max_size,
             timeout,
         })
@@ -265,7 +289,9 @@ impl NativeHttpClient {
         body,
         proxy = None,
         headers_callback = None,
-        bytes_callback = None
+        bytes_callback = None,
+        request_timeout = None,
+        request_max_size = None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn fetch<'py>(
@@ -278,6 +304,8 @@ impl NativeHttpClient {
         proxy: Option<(String, Option<Vec<u8>>)>,
         headers_callback: Option<Py<PyAny>>,
         bytes_callback: Option<Py<PyAny>>,
+        request_timeout: Option<f64>,
+        request_max_size: Option<usize>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.client_for_proxy(
             proxy.as_ref().map(|(url, _)| url.as_str()),
@@ -285,8 +313,22 @@ impl NativeHttpClient {
                 .as_ref()
                 .and_then(|(_, authorization)| authorization.as_deref()),
         )?;
-        let max_size = self.max_size;
-        let timeout = self.timeout;
+        let max_size = request_max_size.unwrap_or(self.max_size);
+        let decode_response = self.transport_defaults;
+        let timeout = match request_timeout {
+            Some(value) => {
+                let timeout = Duration::try_from_secs_f64(value).map_err(|_| {
+                    PyValueError::new_err("download_timeout must be a positive finite number")
+                })?;
+                if timeout.is_zero() {
+                    return Err(PyValueError::new_err(
+                        "download_timeout must be a positive finite number",
+                    ));
+                }
+                timeout
+            }
+            None => self.timeout,
+        };
         crate::runtime::future_into_py(py, async move {
             let parsed_method = Method::from_bytes(method.as_bytes()).map_err(|error| {
                 download_error(format!("invalid HTTP method {method:?}: {error}"))
@@ -343,7 +385,7 @@ impl NativeHttpClient {
                 )));
             }
 
-            let mut reader = response_reader(response, &encodings);
+            let mut reader = response_reader(response, &encodings, decode_response);
             let mut response_body = Vec::new();
             let mut chunk = [0_u8; 16 * 1024];
             while !stopped {

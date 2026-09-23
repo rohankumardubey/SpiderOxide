@@ -418,7 +418,7 @@ class SpiderMiddlewareManager:
     ) -> AsyncIterator[object]:
         current = await maybe_await(start)
         self._validate_start_output(current, "start")
-        modern_seen = False
+        legacy_compatible = not isinstance(current, AsyncIterable)
         for component in reversed(self.middleware):
             method = getattr(component, "process_start", None)
             if method is not None:
@@ -427,16 +427,19 @@ class SpiderMiddlewareManager:
                     current = _as_async_iterable(current)
                 current = await maybe_await(_call_spider_method(method, current, spider=spider))
                 self._validate_start_output(current, "process_start")
-                modern_seen = True
+                if not getattr(component, "_legacy_start_compatible", False):
+                    legacy_compatible = False
                 continue
             legacy = getattr(component, "process_start_requests", None)
             if legacy is None:
                 continue
-            if modern_seen or isinstance(current, AsyncIterable):
+            if not legacy_compatible:
                 raise TypeError(
                     "process_start_requests cannot consume asynchronous start output; "
                     "implement process_start instead"
                 )
+            if isinstance(current, AsyncIterable):
+                current = [output async for output in current]
             current = await maybe_await(legacy(current, spider))
             self._validate_start_output(current, "process_start_requests")
         async for item in _iterate_middleware_output(current, "process_start"):

@@ -20,6 +20,15 @@ from .crawl import CrawlSpider, Rule
 from .crawler import Crawler, CrawlerRunner
 from .depth import DepthMiddleware
 from .downloader import Downloader, HttpxDownloader, RustDownloader
+from .downloadermiddlewares import (
+    DefaultHeadersMiddleware,
+    DownloaderStatsMiddleware,
+    DownloadTimeoutMiddleware,
+    HttpAuthMiddleware,
+    HttpCompressionMiddleware,
+    OffsiteMiddleware,
+    UserAgentMiddleware,
+)
 from .downloadhandlers import (
     BaseDownloadHandler,
     DataURIDownloadHandler,
@@ -102,6 +111,7 @@ from .pipelines import (
     S3FilesStore,
 )
 from .proxy import HttpProxyMiddleware
+from .redirect import MetaRefreshMiddleware, RedirectMiddleware
 from .retry import RetryMiddleware, get_retry_request
 from .selectors import (
     Compose,
@@ -117,6 +127,25 @@ from .selectors import (
 from .settings import Settings
 from .signals import SignalManager
 from .spider import Spider
+from .spidermiddlewares import (
+    BaseSpiderMiddleware,
+    DefaultReferrerPolicy,
+    HttpError,
+    HttpErrorMiddleware,
+    MetaCopyDetectionMiddleware,
+    NoReferrerPolicy,
+    NoReferrerWhenDowngradePolicy,
+    OriginPolicy,
+    OriginWhenCrossOriginPolicy,
+    RefererMiddleware,
+    ReferrerPolicy,
+    SameOriginPolicy,
+    StartSpiderMiddleware,
+    StrictOriginPolicy,
+    StrictOriginWhenCrossOriginPolicy,
+    UnsafeUrlPolicy,
+    UrlLengthMiddleware,
+)
 from .stats import StatsCollector
 from .types import (
     Field,
@@ -134,6 +163,7 @@ __all__ = [
     "BackendUnavailableError",
     "BaseDownloadHandler",
     "BaseItemExporter",
+    "BaseSpiderMiddleware",
     "BlockingFeedStorage",
     "Bz2Plugin",
     "CloseSpider",
@@ -151,7 +181,11 @@ __all__ = [
     "DownloadHandler",
     "DownloadHandlers",
     "Downloader",
+    "DownloaderStatsMiddleware",
+    "DownloadTimeoutMiddleware",
     "DataURIDownloadHandler",
+    "DefaultHeadersMiddleware",
+    "DefaultReferrerPolicy",
     "DummyPolicy",
     "DepthMiddleware",
     "DropItem",
@@ -177,6 +211,10 @@ __all__ = [
     "Headers",
     "HtmlResponse",
     "IgnoreRequest",
+    "HttpAuthMiddleware",
+    "HttpCompressionMiddleware",
+    "HttpError",
+    "HttpErrorMiddleware",
     "HttpxDownloader",
     "HTTPDownloadHandler",
     "HttpProxyMiddleware",
@@ -202,17 +240,27 @@ __all__ = [
     "MediaPipeline",
     "MemoryDebugger",
     "MemoryUsage",
+    "MetaCopyDetectionMiddleware",
+    "MetaRefreshMiddleware",
     "SpiderState",
     "NotConfigured",
     "NotSupported",
     "NativeCrawlEngine",
     "NativeHttpCacheStorage",
+    "NoReferrerPolicy",
+    "NoReferrerWhenDowngradePolicy",
+    "OffsiteMiddleware",
+    "OriginPolicy",
+    "OriginWhenCrossOriginPolicy",
     "PriorityRequest",
     "PostProcessingManager",
     "PeriodicLog",
     "Request",
     "RequestData",
     "RFC2616Policy",
+    "RedirectMiddleware",
+    "RefererMiddleware",
+    "ReferrerPolicy",
     "Response",
     "RetryMiddleware",
     "Rule",
@@ -221,6 +269,7 @@ __all__ = [
     "S3DownloadHandler",
     "RustDownloader",
     "ScheduledRequest",
+    "SameOriginPolicy",
     "SelectJmes",
     "Scheduler",
     "Selector",
@@ -230,10 +279,16 @@ __all__ = [
     "Spider",
     "SpiderOxideError",
     "StatsCollector",
+    "StartSpiderMiddleware",
     "StopDownload",
+    "StrictOriginPolicy",
+    "StrictOriginWhenCrossOriginPolicy",
     "StdoutFeedStorage",
     "TextResponse",
     "TakeFirst",
+    "UnsafeUrlPolicy",
+    "UrlLengthMiddleware",
+    "UserAgentMiddleware",
     "XmlResponse",
     "XmlItemExporter",
     "fingerprint",

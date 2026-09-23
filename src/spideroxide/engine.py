@@ -246,8 +246,6 @@ class CrawlEngine:
             async for output in start:
                 if output is None:
                     continue
-                if isinstance(output, Request):
-                    output.meta.setdefault("is_start_request", True)
                 await queue.put(output)
         except asyncio.CancelledError:
             raise
@@ -774,7 +772,6 @@ class NativeCrawlEngine(CrawlEngine):
                 if output is None:
                     continue
                 if isinstance(output, Request):
-                    output.meta.setdefault("is_start_request", True)
                     if not await self.scheduler.wait_for_pending_slot():
                         return
                     await self._schedule(output)
