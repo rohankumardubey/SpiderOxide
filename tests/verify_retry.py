@@ -56,6 +56,7 @@ class SequenceDownloader:
 
 class RetrySpider(Spider):
     name = "retry"
+    custom_settings = {"HTTPERROR_ALLOW_ALL": True}
 
     def __init__(
         self,

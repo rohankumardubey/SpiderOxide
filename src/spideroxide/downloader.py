@@ -214,6 +214,28 @@ def _transport_headers(
     return pairs
 
 
+def _request_timeout(request: Request, default: float) -> float:
+    value = request.meta.get("download_timeout", default)
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as error:
+        raise DownloadError("download_timeout must be a positive finite number") from error
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise DownloadError("download_timeout must be a positive finite number")
+    return timeout
+
+
+def _request_max_size(request: Request, default: int) -> int:
+    value = request.meta.get("download_maxsize", default)
+    try:
+        max_size = int(value)
+    except (TypeError, ValueError) as error:
+        raise DownloadError("download_maxsize must be a non-negative integer") from error
+    if max_size < 0:
+        raise DownloadError("download_maxsize must be a non-negative integer")
+    return max_size
+
+
 class HttpxDownloader:
     def __init__(
         self,
@@ -228,6 +250,7 @@ class HttpxDownloader:
         self._user_agent = user_agent
         self._transport = transport
         self._crawler = crawler
+        self._standalone = crawler is None
         self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
         self.client = self._create_client()
         self._proxy_clients: dict[tuple[str, bytes | None], httpx.AsyncClient] = {}
@@ -250,16 +273,22 @@ class HttpxDownloader:
         client = httpx.AsyncClient(
             timeout=self._timeout,
             follow_redirects=False,
-            headers={"User-Agent": self._user_agent} if self._user_agent else None,
+            headers={"User-Agent": self._user_agent}
+            if self._standalone and self._user_agent
+            else None,
             transport=self._transport,
             proxy=proxy_config,
             trust_env=False,
         )
+        if not self._standalone:
+            client.headers.clear()
         # HTTPX always creates a client jar; persistence belongs to CookiesMiddleware.
         client._cookies = _StatelessCookies()
         return client
 
     async def fetch(self, request: Request) -> Response:
+        timeout = _request_timeout(request, self._timeout)
+        max_size = _request_max_size(request, self.max_size)
         proxy, authorization = _proxy_details(request)
         if proxy is None:
             client = self.client
@@ -283,6 +312,7 @@ class HttpxDownloader:
                     cookies_enabled=self._cookies_enabled,
                 ),
                 content=request.body or None,
+                timeout=timeout,
             ) as raw_response:
                 request.meta["download_latency"] = asyncio.get_running_loop().time() - started
                 response_headers = Headers()
@@ -297,13 +327,14 @@ class HttpxDownloader:
                     spider=None if self._crawler is None else self._crawler.spider,
                 )
                 declared_size = int(raw_response.headers.get("Content-Length", 0))
-                if stop is None and self.max_size and declared_size > self.max_size:
-                    raise DownloadError(
-                        f"response exceeded DOWNLOAD_MAXSIZE ({self.max_size} bytes)"
-                    )
+                if stop is None and max_size and declared_size > max_size:
+                    raise DownloadError(f"response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)")
                 body = bytearray()
                 if stop is None:
-                    async for chunk in raw_response.aiter_bytes():
+                    chunks = (
+                        raw_response.aiter_bytes() if self._standalone else raw_response.aiter_raw()
+                    )
+                    async for chunk in chunks:
                         body.extend(chunk)
                         stop = _stop_download(
                             self._crawler,
@@ -314,9 +345,9 @@ class HttpxDownloader:
                         )
                         if stop is not None:
                             break
-                        if self.max_size and len(body) > self.max_size:
+                        if max_size and len(body) > max_size:
                             raise DownloadError(
-                                f"response exceeded DOWNLOAD_MAXSIZE ({self.max_size} bytes)"
+                                f"response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)"
                             )
 
                 response = _response(
@@ -334,7 +365,8 @@ class HttpxDownloader:
                         raise stop
                 return response
         except httpx.HTTPError as error:
-            raise DownloadError(f"unable to download {request.url}: {error}") from error
+            detail = str(error) or type(error).__name__
+            raise DownloadError(f"unable to download {request.url}: {detail}") from error
 
     async def close(self) -> None:
         clients = [self.client, *self._proxy_clients.values()]
@@ -378,12 +410,23 @@ class RustDownloader:
 
         self._download_error: type[Exception] = NativeDownloadError
         self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
-        self._client: object | None = NativeHttpClient(timeout, max_size, user_agent)
+        standalone = crawler is None
+        self._client: object | None = NativeHttpClient(
+            timeout,
+            max_size,
+            user_agent if standalone else None,
+            standalone,
+        )
 
     async def fetch(self, request: Request) -> Response:
         client = self._client
         if client is None:
             raise RuntimeError("downloader is closed")
+        timeout = _request_timeout(request, self.settings.getfloat("DOWNLOAD_TIMEOUT", 180.0))
+        max_size = _request_max_size(
+            request,
+            self.settings.getint("DOWNLOAD_MAXSIZE", 0),
+        )
         proxy, authorization = _proxy_details(request)
         stopped: list[StopDownload] = []
         loop = asyncio.get_running_loop()
@@ -450,6 +493,8 @@ class RustDownloader:
                 None if proxy is None else (proxy, authorization),
                 native_headers_callback,
                 native_bytes_callback,
+                timeout,
+                max_size,
             )
         except self._download_error as error:
             raise DownloadError(str(error)) from error

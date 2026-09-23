@@ -26,7 +26,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "RANDOMIZE_DOWNLOAD_DELAY": True,
     "DOWNLOAD_SLOTS": {},
     "DOWNLOAD_TIMEOUT": 180.0,
-    "DOWNLOAD_MAXSIZE": 0,
+    "DOWNLOAD_MAXSIZE": 1024 * 1024 * 1024,
+    "DOWNLOAD_WARNSIZE": 32 * 1024 * 1024,
     "DOWNLOADER_BACKEND": "python",
     "DOWNLOAD_HANDLERS_BASE": {
         "data": "spideroxide.downloadhandlers.DataURIDownloadHandler",
@@ -57,9 +58,23 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "IMAGES_STORE_GCS_ACL": "",
     "IMAGES_STORE_S3_ACL": "private",
     "USER_AGENT": "SpiderOxide/0.1",
+    "DEFAULT_REQUEST_HEADERS": {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en",
+    },
+    "HTTPAUTH_USER": "",
+    "HTTPAUTH_PASS": "",
+    "HTTPAUTH_DOMAIN": None,
     "DOWNLOADER_MIDDLEWARES_BASE": {
+        "spideroxide.downloadermiddlewares.OffsiteMiddleware": 50,
         "spideroxide.robots.RobotsTxtMiddleware": 100,
+        "spideroxide.downloadermiddlewares.HttpAuthMiddleware": 300,
+        "spideroxide.downloadermiddlewares.DownloadTimeoutMiddleware": 350,
+        "spideroxide.downloadermiddlewares.DefaultHeadersMiddleware": 400,
+        "spideroxide.downloadermiddlewares.UserAgentMiddleware": 500,
         "spideroxide.retry.RetryMiddleware": 550,
+        "spideroxide.redirect.MetaRefreshMiddleware": 580,
+        "spideroxide.downloadermiddlewares.HttpCompressionMiddleware": 590,
         "spideroxide.redirect.RedirectMiddleware": 600,
         "spideroxide.cookies.CookiesMiddleware": 700,
         "spideroxide.proxy.HttpProxyMiddleware": 750,
@@ -73,7 +88,12 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "COOKIES_ENABLED": True,
     "COOKIES_DEBUG": False,
     "SPIDER_MIDDLEWARES_BASE": {
+        "spideroxide.spidermiddlewares.StartSpiderMiddleware": 25,
+        "spideroxide.spidermiddlewares.HttpErrorMiddleware": 50,
+        "spideroxide.spidermiddlewares.RefererMiddleware": 700,
+        "spideroxide.spidermiddlewares.UrlLengthMiddleware": 800,
         "spideroxide.depth.DepthMiddleware": 900,
+        "spideroxide.spidermiddlewares.MetaCopyDetectionMiddleware": 1000,
     },
     "SPIDER_MIDDLEWARES": [],
     "ITEM_PIPELINES": [],
@@ -148,6 +168,13 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "DEPTH_LIMIT": 0,
     "DEPTH_PRIORITY": 0,
     "DEPTH_STATS_VERBOSE": False,
+    "REFERER_ENABLED": True,
+    "REFERRER_POLICY": "scrapy-default",
+    "REFERRER_POLICIES": {},
+    "URLLENGTH_LIMIT": 2083,
+    "HTTPERROR_ALLOW_ALL": False,
+    "HTTPERROR_ALLOWED_CODES": [],
+    "META_COPY_WARN_SKIP_KEYS": [],
     "RETRY_ENABLED": True,
     "RETRY_TIMES": 2,
     "RETRY_HTTP_CODES": [500, 502, 503, 504, 522, 524, 408, 429],
@@ -159,6 +186,10 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "REDIRECT_ENABLED": True,
     "REDIRECT_MAX_TIMES": 20,
     "REDIRECT_PRIORITY_ADJUST": 2,
+    "METAREFRESH_ENABLED": True,
+    "METAREFRESH_MAXDELAY": 100,
+    "METAREFRESH_IGNORE_TAGS": ["noscript"],
+    "COMPRESSION_ENABLED": True,
     "AUTOTHROTTLE_ENABLED": False,
     "AUTOTHROTTLE_START_DELAY": 5.0,
     "AUTOTHROTTLE_MAX_DELAY": 60.0,
@@ -247,6 +278,10 @@ class Settings(MutableMapping[str, object]):
 
     def getfloat(self, name: str, default: float = 0.0) -> float:
         return float(self.get(name, default))
+
+    def getpriority(self, name: str) -> int | None:
+        setting = self._values.get(name)
+        return None if setting is None else setting.priority
 
     def getlist(self, name: str, default: list[object] | None = None) -> list[object]:
         value = self.get(name, default or [])

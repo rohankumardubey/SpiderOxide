@@ -336,6 +336,28 @@ middleware failures skip request errbacks and continue at the next eligible spid
 Items yielded before a callback or middleware generator fails are retained and continue through the
 remaining middleware chain.
 
+### Built-in middleware
+
+The default middleware stack follows Scrapy's ordering and override rules. Downloader middleware
+includes off-site filtering, HTTP authentication, per-request download timeouts, default headers,
+user agents, retries, meta-refresh and HTTP redirects, HTTP compression, cookies, proxies, byte
+statistics, and caching. Spider middleware marks start requests, filters unhandled HTTP statuses,
+applies referrer policies, rejects overlong URLs, tracks depth, and warns about copied internal
+request metadata.
+
+Every default can be disabled or replaced through `DOWNLOADER_MIDDLEWARES` or
+`SPIDER_MIDDLEWARES`. Request metadata remains authoritative: `download_timeout`,
+`download_maxsize`, `allow_offsite`, `handle_httpstatus_list`, `handle_httpstatus_all`, and
+`referrer_policy` override their corresponding defaults for one request. `HTTPAUTH_DOMAIN`
+restricts settings-level credentials, while per-request `http_user`, `http_pass`, and
+`http_auth_domain` provide isolated overrides. Redirects regenerate `Referer` using the active
+referrer policy.
+
+Both HTTP backends consume raw compressed response bodies during crawls so
+`HttpCompressionMiddleware` owns decompression, size enforcement, and statistics consistently.
+Standalone `HttpxDownloader` and `RustDownloader` instances retain their existing transparent
+compression behavior.
+
 ## Cookies
 
 Cookie handling is enabled by default through `CookiesMiddleware`. Native cookie jars apply
