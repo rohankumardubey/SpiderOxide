@@ -6,9 +6,11 @@ from typing import Any
 
 PRIORITIES = {
     "default": 0,
+    "command": 10,
+    "addon": 15,
     "project": 20,
     "spider": 30,
-    "command": 40,
+    "cmdline": 40,
 }
 
 DEFAULT_SETTINGS: dict[str, object] = {
