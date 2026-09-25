@@ -70,6 +70,7 @@ module-name = "spideroxide._native"
 include = [
     { path = "src/spideroxide/**/*.py", format = ["sdist", "wheel"] },
     { path = "src/spideroxide/py.typed", format = ["sdist", "wheel"] },
+    { path = "compat/scrapy/**/*", format = "sdist" },
 ]
 exclude = [
     { path = "Cargo.lock", format = "wheel" },

@@ -34,19 +34,18 @@ class Headers(MutableMapping[str, bytes]):
 
     def __init__(
         self,
-        values: Mapping[HeaderName, HeaderValues]
+        seq: Mapping[HeaderName, HeaderValues]
         | Iterable[tuple[HeaderName, HeaderValues]]
         | None = None,
-        *,
-        encoding: str = "latin-1",
+        encoding: str = "utf-8",
     ) -> None:
         self.encoding = encoding
         self._values: dict[str, tuple[str, list[bytes]]] = {}
-        if isinstance(values, Headers):
-            for name, entries in values._values.values():
+        if isinstance(seq, Headers):
+            for name, entries in seq._values.values():
                 self.setlist(name, entries)
-        elif values:
-            entries = values.items() if isinstance(values, Mapping) else values
+        elif seq:
+            entries = seq.items() if isinstance(seq, Mapping) else seq
             for name, value in entries:
                 self.appendlist(name, value)
 

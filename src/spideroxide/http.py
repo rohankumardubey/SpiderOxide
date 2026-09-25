@@ -86,8 +86,10 @@ def _body_bytes(body: bytes | str | None, encoding: str, *, text: bool = False) 
 
 
 def _copy_cookies(
-    cookies: CookieInput,
+    cookies: CookieInput | None,
 ) -> dict[str | bytes, CookieValue] | list[dict[str, CookieValue]]:
+    if cookies is None:
+        return {}
     if isinstance(cookies, Mapping):
         return dict(cookies)
     if isinstance(cookies, (str, bytes)):
@@ -337,16 +339,16 @@ class Request:
     url: str
     callback: Callback | None = None
     method: str = "GET"
-    headers: HeaderInput = field(default_factory=Headers)
-    body: bytes | str | None = b""
-    cookies: CookieInput = field(default_factory=dict)
-    meta: dict[str, Any] = field(default_factory=dict)
+    headers: HeaderInput | None = None
+    body: bytes | str | None = None
+    cookies: CookieInput | None = None
+    meta: dict[str, Any] | None = None
     encoding: str = "utf-8"
     priority: int = 0
     dont_filter: bool = False
     errback: Errback | None = None
-    flags: tuple[str, ...] = ()
-    cb_kwargs: dict[str, Any] = field(default_factory=dict)
+    flags: list[str] | tuple[str, ...] | None = None
+    cb_kwargs: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         encoding = _normalized_encoding(self.encoding)
@@ -360,9 +362,9 @@ class Request:
             Headers(self.headers, encoding=encoding),
         )
         object.__setattr__(self, "cookies", _copy_cookies(self.cookies))
-        object.__setattr__(self, "meta", dict(self.meta))
-        object.__setattr__(self, "cb_kwargs", dict(self.cb_kwargs))
-        object.__setattr__(self, "flags", tuple(self.flags))
+        object.__setattr__(self, "meta", dict(self.meta or {}))
+        object.__setattr__(self, "cb_kwargs", dict(self.cb_kwargs or {}))
+        object.__setattr__(self, "flags", tuple(self.flags or ()))
         if not isinstance(self.priority, int):
             raise TypeError(f"Request priority not an integer: {self.priority!r}")
         if self.callback is not None and not callable(self.callback):
@@ -465,15 +467,29 @@ class Response:
 
     url: str
     status: int = 200
-    headers: HeaderInput = field(default_factory=Headers)
+    headers: HeaderInput | None = None
     body: bytes = b""
+    flags: list[str] | tuple[str, ...] | None = None
     request: Request | None = None
-    flags: tuple[str, ...] = ()
-    protocol: str | None = None
     certificate: object | None = None
     ip_address: IPv4Address | IPv6Address | None = None
+    protocol: str | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.flags, Request) or (
+            self.flags is None and isinstance(self.request, (list, tuple))
+        ):
+            # Preserve SpiderOxide's original positional order while accepting Scrapy's order.
+            old_request = self.flags
+            old_flags = self.request
+            old_protocol = self.certificate
+            old_certificate = self.ip_address
+            old_ip_address = self.protocol
+            object.__setattr__(self, "flags", old_flags)
+            object.__setattr__(self, "request", old_request)
+            object.__setattr__(self, "certificate", old_certificate)
+            object.__setattr__(self, "ip_address", old_ip_address)
+            object.__setattr__(self, "protocol", old_protocol)
         _validate_url(self.url)
         object.__setattr__(self, "status", int(self.status))
         if not 100 <= self.status <= 599:
@@ -481,7 +497,7 @@ class Response:
         object.__setattr__(self, "headers", Headers(self.headers))
         if not isinstance(self.body, bytes):
             raise TypeError("Response body must be bytes. Use TextResponse for unicode bodies.")
-        object.__setattr__(self, "flags", tuple(self.flags))
+        object.__setattr__(self, "flags", tuple(self.flags or ()))
 
     @property
     def meta(self) -> dict[str, Any]:

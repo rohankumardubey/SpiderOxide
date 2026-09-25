@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spideroxide-scrapy-compat"
+version = "0.1.0"
+requires-python = ">=3.10"
+description = "Scrapy 2.19 import compatibility for SpiderOxide"
+readme = "README.md"
+license = "MIT"
+dependencies = ["spideroxide==0.1.0"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Scrapy",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/rohankumardubey/SpiderOxide"
+Issues = "https://github.com/rohankumardubey/SpiderOxide/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["scrapy*"]
+

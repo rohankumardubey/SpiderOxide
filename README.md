@@ -93,6 +93,23 @@ On Windows PowerShell, activate the environment with:
 .\.venv\Scripts\Activate.ps1
 ```
 
+### Scrapy-compatible imports
+
+The optional `spideroxide-scrapy-compat` distribution exposes implemented SpiderOxide APIs through
+Scrapy 2.19 import paths, allowing compatible projects to keep imports such as
+`from scrapy import Spider, Request`.
+
+```bash
+python -m pip uninstall Scrapy
+python -m pip install spideroxide spideroxide-scrapy-compat
+```
+
+Upstream Scrapy and the compatibility distribution both own the `scrapy` package and must be
+installed in separate environments. The main `spideroxide` distribution never claims that
+namespace, so it remains safe to install beside upstream Scrapy for differential testing. See
+[`compat/scrapy/COMPATIBILITY.md`](compat/scrapy/COMPATIBILITY.md) for the supported module surface,
+public roadmap gaps, and explicitly unsupported private internals.
+
 ## Crawling
 
 A spider defines its initial URLs and parses responses into requests or items.
