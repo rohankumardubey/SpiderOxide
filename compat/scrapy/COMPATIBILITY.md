@@ -2,6 +2,9 @@
 
 The compatibility target is Scrapy 2.19. The `spideroxide-scrapy-compat` distribution maps
 documented imports to SpiderOxide implementations without installing or importing upstream Scrapy.
+The version-pinned [`conformance` suite](../../conformance/README.md) compares supported public
+behavior with Scrapy 2.19.0 on both SpiderOxide crawl engines and publishes JSON and Markdown
+reports in CI.
 
 ## Supported
 

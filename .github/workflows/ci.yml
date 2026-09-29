@@ -59,9 +59,27 @@ jobs:
       - name: Run integration and compatibility suite
         run: .venv/bin/python tests/run_all.py
 
+      - name: Install Scrapy conformance baseline
+        run: .venv/bin/python -m pip install -r requirements-conformance.txt
+
+      - name: Run Scrapy conformance suite
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          .venv/bin/python conformance/audit.py
+          .venv/bin/python conformance/run.py \
+            --output-dir conformance-results/python-${{ matrix.python-version }}
+
+      - name: Upload Scrapy conformance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scrapy-conformance-python-${{ matrix.python-version }}
+          path: conformance-results/python-${{ matrix.python-version }}/
+          if-no-files-found: error
+
       - name: Smoke-test Scrapy comparison
         run: |
-          .venv/bin/python -m pip install "Scrapy>=2.17,<3"
           .venv/bin/python benchmarks/benchmark_scrapy.py \
             --sizes 100 --warmups 1 --runs 2 --output-dir /tmp/scrapy-comparison
 
