@@ -32,3 +32,4 @@ target/
 # Generated benchmark scratch data
 *.prof
 *.trace
+conformance-results/

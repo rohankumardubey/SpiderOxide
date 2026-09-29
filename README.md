@@ -110,6 +110,24 @@ namespace, so it remains safe to install beside upstream Scrapy for differential
 [`compat/scrapy/COMPATIBILITY.md`](compat/scrapy/COMPATIBILITY.md) for the supported module surface,
 public roadmap gaps, and explicitly unsupported private internals.
 
+### Scrapy conformance
+
+The version-pinned [conformance suite](conformance/README.md) replays documented public behavior
+against Scrapy 2.19.0 and SpiderOxide's Python and Rust engines in isolated subprocesses. It covers
+HTTP models, request identity, settings, selectors and items, spider utilities, runtime APIs, and a
+real data-URI crawl.
+
+```bash
+python -m pip install -r requirements-conformance.txt
+python conformance/audit.py
+python conformance/run.py --output-dir conformance-results
+```
+
+`conformance/manifest.json` tracks adapted, excluded, and unsupported upstream test areas with a
+rationale for every exclusion. Each CI matrix job publishes machine-readable JSON and a Markdown
+compatibility report containing the exact Scrapy, SpiderOxide, Python, and platform versions.
+Differential mismatches fail the job.
+
 ## Crawling
 
 A spider defines its initial URLs and parses responses into requests or items.

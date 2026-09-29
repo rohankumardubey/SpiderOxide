@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "scrapy_repository": "https://github.com/scrapy/scrapy",
+  "scrapy_revision": "2.19.0",
+  "scrapy_version": "2.19.0",
+  "cases": [
+    {
+      "id": "http-models",
+      "title": "Requests, responses, headers, and forms",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_http_headers.py",
+        "tests/test_http_request.py",
+        "tests/test_http_request_form.py",
+        "tests/test_http_request_json.py",
+        "tests/test_http_response.py",
+        "tests/test_http_response_text.py",
+        "tests/test_request_attribute_binding.py",
+        "tests/test_request_cb_kwargs.py"
+      ],
+      "rationale": "Public value semantics are replayed unchanged against upstream Scrapy and both SpiderOxide engines."
+    },
+    {
+      "id": "request-identity",
+      "title": "Request serialization and fingerprints",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_request_dict.py",
+        "tests/test_response_dict.py",
+        "tests/test_utils_curl.py",
+        "tests/test_utils_request.py"
+      ],
+      "rationale": "Public serialization, curl rendering, canonicalization, and fingerprint outputs are compared byte-for-byte."
+    },
+    {
+      "id": "settings",
+      "title": "Settings and priorities",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_settings/",
+        "tests/test_utils_conf.py",
+        "tests/test_utils_project.py"
+      ],
+      "rationale": "Priority resolution, typed getters, copying, and project-facing settings behavior are compared directly."
+    },
+    {
+      "id": "selectors-items-links",
+      "title": "Selectors, items, loaders, and links",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_item.py",
+        "tests/test_link.py",
+        "tests/test_linkextractors.py",
+        "tests/test_loader.py",
+        "tests/test_selector.py"
+      ],
+      "rationale": "Representative public extraction, link normalization, item, and loader results are compared structurally."
+    },
+    {
+      "id": "spiders-and-utilities",
+      "title": "Spider helpers, sitemap parsing, and utilities",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_spider.py",
+        "tests/test_spider_sitemap.py",
+        "tests/test_utils_iterators.py",
+        "tests/test_utils_python.py",
+        "tests/test_utils_response.py",
+        "tests/test_utils_sitemap.py",
+        "tests/test_utils_spider.py",
+        "tests/test_utils_url.py"
+      ],
+      "rationale": "Documented spider and utility outputs are compared without depending on Scrapy private implementation state."
+    },
+    {
+      "id": "runtime-api",
+      "title": "Crawler, runner, process, and spider-loader APIs",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_crawler.py",
+        "tests/test_crawler_runners.py",
+        "tests/test_spiderloader/"
+      ],
+      "rationale": "Public constructor and method signatures are compared, while lifecycle behavior is exercised by the real-crawl case. SpiderOxide's additive keyword-only downloader injection hook is normalized out."
+    },
+    {
+      "id": "real-crawl",
+      "title": "Real crawl lifecycle",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_crawl.py",
+        "tests/test_pipeline_crawl.py",
+        "tests/test_spider_crawl.py",
+        "tests/test_spider_start.py"
+      ],
+      "rationale": "The same data-URI spider runs through upstream Scrapy and SpiderOxide's Python and Rust engines."
+    },
+    {
+      "id": "existing-component-adaptations",
+      "title": "Implemented middleware, pipelines, exporters, queues, and extensions",
+      "status": "excluded",
+      "upstream_tests": [
+        "tests/test_closespider.py",
+        "tests/test_downloader_handlers.py",
+        "tests/test_downloadermiddleware.py",
+        "tests/test_downloadermiddleware_*.py",
+        "tests/test_downloaderslotssettings.py",
+        "tests/test_dupefilters.py",
+        "tests/test_exporters.py",
+        "tests/test_extension_debug.py",
+        "tests/test_extension_memdebug.py",
+        "tests/test_extension_memusage.py",
+        "tests/test_extension_periodic_log.py",
+        "tests/test_feedexport*.py",
+        "tests/test_http_cookies.py",
+        "tests/test_logstats.py",
+        "tests/test_pipeline_files.py",
+        "tests/test_pipeline_images.py",
+        "tests/test_pipeline_media.py",
+        "tests/test_pqueues.py",
+        "tests/test_responsetypes.py",
+        "tests/test_robotstxt_interface.py",
+        "tests/test_scheduler*.py",
+        "tests/test_spiderstate.py",
+        "tests/test_spidermiddleware*.py",
+        "tests/test_squeues*.py",
+        "tests/test_stats.py",
+        "tests/test_utils_datatypes.py"
+      ],
+      "rationale": "These public behaviors already have repository verification scripts, but their upstream pytest fixtures are private to Scrapy. Differential probes will replace the local adaptations incrementally."
+    },
+    {
+      "id": "private-core",
+      "title": "Private engine, scraper, downloader, and protocol internals",
+      "status": "excluded",
+      "upstream_tests": [
+        "tests/test_core_*.py",
+        "tests/test_engine*.py",
+        "tests/test_downloader_handler_*.py",
+        "tests/test_http2_client_protocol.py"
+      ],
+      "rationale": "These modules assert undocumented Scrapy and Twisted implementation details rather than public compatibility contracts."
+    },
+    {
+      "id": "upstream-test-infrastructure",
+      "title": "Upstream test infrastructure and dependency checks",
+      "status": "excluded",
+      "upstream_tests": [
+        "tests/test_cmdline*",
+        "tests/test_dependencies.py",
+        "tests/test_request_left.py",
+        "tests/test_utils_benchserver.py",
+        "tests/test_zz_resources.py"
+      ],
+      "rationale": "These tests validate Scrapy's own test fixtures, dependency declarations, resource cleanup helpers, or test server rather than application behavior."
+    },
+    {
+      "id": "cli-project-tooling",
+      "title": "CLI commands and project generators",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_command_crawl.py",
+        "tests/test_command_fetch.py",
+        "tests/test_command_genspider.py",
+        "tests/test_command_parse.py",
+        "tests/test_command_runspider.py",
+        "tests/test_command_shell.py",
+        "tests/test_command_startproject.py",
+        "tests/test_command_version.py",
+        "tests/test_commands.py"
+      ],
+      "rationale": "The scrapy executable and project command surface are tracked by issue #40."
+    },
+    {
+      "id": "addons-services",
+      "title": "Add-ons and runtime services",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_addons.py",
+        "tests/test_middleware.py",
+        "tests/test_pipelines.py"
+      ],
+      "rationale": "Scrapy add-on and service APIs are tracked by issue #41."
+    },
+    {
+      "id": "spider-contracts",
+      "title": "Spider contracts",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_contracts.py",
+        "tests/test_command_check.py"
+      ],
+      "rationale": "Spider contracts and the check command are tracked by issue #45."
+    },
+    {
+      "id": "networking-configuration",
+      "title": "Resolvers, TLS, HTTP/2, and low-level networking configuration",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_resolver.py",
+        "tests/test_utils_ssl.py"
+      ],
+      "rationale": "Resolver and TLS context compatibility is tracked by issue #46."
+    },
+    {
+      "id": "logging-mail-utilities",
+      "title": "Logging, mail, console, template, and remaining utilities",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_logformatter.py",
+        "tests/test_mail.py",
+        "tests/test_utils_console.py",
+        "tests/test_utils_decorators.py",
+        "tests/test_utils_display.py",
+        "tests/test_utils_gz.py",
+        "tests/test_utils_httpobj.py",
+        "tests/test_utils_job.py",
+        "tests/test_utils_log.py",
+        "tests/test_utils_misc/",
+        "tests/test_utils_serialize.py",
+        "tests/test_utils_template.py",
+        "tests/test_utils_trackref.py"
+      ],
+      "rationale": "Remaining public exceptions, logging, mail, and utility APIs are tracked by issue #47."
+    },
+    {
+      "id": "extension-control",
+      "title": "Telnet, remote control, throttling, and mail-based extensions",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_extension_remote_control.py",
+        "tests/test_extension_statsmailer.py",
+        "tests/test_extension_telnet.py",
+        "tests/test_extension_throttle.py",
+        "tests/test_utils_remote_control.py"
+      ],
+      "rationale": "Remote-control and remaining extension interfaces are tracked by issue #48."
+    },
+    {
+      "id": "third-party-integrations",
+      "title": "Third-party integration behavior",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_poet.py"
+      ],
+      "rationale": "Third-party Scrapy integration certification is tracked by issue #49."
+    },
+    {
+      "id": "twisted-reactor",
+      "title": "Deferred, reactor, signal, and subprocess integration",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_crawler_subprocess.py",
+        "tests/test_signalmanager.py",
+        "tests/test_signals.py",
+        "tests/test_utils_asyncgen.py",
+        "tests/test_utils_asyncio.py",
+        "tests/test_utils_defer.py",
+        "tests/test_utils_ossignal.py",
+        "tests/test_utils_reactor.py",
+        "tests/test_utils_reactorless.py",
+        "tests/test_utils_signal.py"
+      ],
+      "rationale": "Twisted Deferred and reactor compatibility is tracked by issue #50; SpiderOxide's asyncio behavior is covered separately."
+    },
+    {
+      "id": "version-deprecations",
+      "title": "Version aliases and deprecation behavior",
+      "status": "unsupported",
+      "upstream_tests": [
+        "tests/test_scrapy__getattr__.py",
+        "tests/test_toplevel.py",
+        "tests/test_utils_deprecate.py"
+      ],
+      "rationale": "Version and deprecation compatibility is tracked by issue #52."
+    }
+  ]
+}
