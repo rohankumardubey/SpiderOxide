@@ -11,7 +11,10 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from types import ModuleType
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPAT_SRC = ROOT / "compat" / "scrapy" / "src"
