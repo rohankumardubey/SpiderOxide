@@ -21,6 +21,9 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 
+[project.scripts]
+scrapy = "scrapy.cmdline:execute"
+
 [project.urls]
 Homepage = "https://github.com/rohankumardubey/SpiderOxide"
 Issues = "https://github.com/rohankumardubey/SpiderOxide/issues"
@@ -28,4 +31,3 @@ Issues = "https://github.com/rohankumardubey/SpiderOxide/issues"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["scrapy*"]
-

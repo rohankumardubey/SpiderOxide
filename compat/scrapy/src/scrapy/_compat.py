@@ -5,7 +5,9 @@ import os
 import sys
 import xmlrpc.client
 from collections.abc import AsyncIterable, Iterable, Mapping
+from configparser import ConfigParser
 from importlib.machinery import ModuleSpec
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 from urllib.parse import urlsplit
@@ -15,6 +17,7 @@ from spideroxide import signals as spideroxide_signals
 from spideroxide.api import DupeFilter, Scheduler, fingerprint_request
 from spideroxide.components import build_from_crawler, load_object
 from spideroxide.downloader import _response_type
+from spideroxide.exceptions import NotConfigured
 from spideroxide.middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
@@ -185,9 +188,93 @@ def arg_to_iter(value: object) -> Iterable[object]:
     return (value,)
 
 
+def closest_scrapy_cfg(path: str | os.PathLike[str] = ".") -> str:
+    current = Path(path).resolve()
+    if current.is_file():
+        current = current.parent
+    for directory in (current, *current.parents):
+        candidate = directory / "scrapy.cfg"
+        if candidate.is_file():
+            return str(candidate)
+    return ""
+
+
+def inside_project() -> bool:
+    module_name = os.environ.get("SCRAPY_SETTINGS_MODULE")
+    if module_name:
+        try:
+            __import__(module_name)
+        except ImportError:
+            pass
+        else:
+            return True
+    return bool(closest_scrapy_cfg())
+
+
+def find_projects(
+    path: str | os.PathLike[str] = ".",
+    *,
+    max_depth: int | None = None,
+    ignored_dirs: Iterable[str] = (),
+) -> Iterable[Path]:
+    root = Path(path)
+    ignored = frozenset(ignored_dirs)
+    for directory, directories, files in os.walk(root):
+        current = Path(directory)
+        if "scrapy.cfg" in files:
+            directories.clear()
+            yield current
+            continue
+        if "pyvenv.cfg" in files:
+            directories.clear()
+            continue
+        if max_depth is not None and len(current.relative_to(root).parts) >= max_depth:
+            directories.clear()
+            continue
+        directories[:] = sorted(
+            name for name in directories if not name.startswith(".") and name not in ignored
+        )
+
+
+def project_data_dir(project: str = "default") -> str:
+    config_path = closest_scrapy_cfg()
+    if not config_path:
+        raise NotConfigured("Not inside a project")
+    config = ConfigParser()
+    config.read(config_path)
+    if config.has_option("datadir", project):
+        directory = Path(config.get("datadir", project))
+    else:
+        directory = Path(config_path).parent / ".scrapy"
+    directory.mkdir(parents=True, exist_ok=True)
+    return str(directory.resolve())
+
+
+def data_path(path: str | os.PathLike[str], createdir: bool = False) -> str:
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        resolved = (
+            Path(project_data_dir()) / resolved if inside_project() else Path(".scrapy") / resolved
+        )
+    if createdir:
+        resolved.mkdir(parents=True, exist_ok=True)
+    return str(resolved)
+
+
 def get_project_settings() -> Settings:
     settings = Settings()
     module_name = os.environ.get("SCRAPY_SETTINGS_MODULE")
+    config_path = closest_scrapy_cfg()
+    if module_name is None and config_path:
+        project_root = str(Path(config_path).parent)
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        config = ConfigParser()
+        config.read(config_path)
+        project = os.environ.get("SCRAPY_PROJECT", "default")
+        module_name = config.get("settings", project, fallback=None)
+        if module_name:
+            os.environ["SCRAPY_SETTINGS_MODULE"] = module_name
     if module_name:
         settings.setmodule(module_name, priority="project")
     valid_envvars = {
@@ -801,7 +888,17 @@ def install() -> None:
             "without_none_values": without_none_values,
         },
     )
-    _module("scrapy.utils.project", {"get_project_settings": get_project_settings})
+    _module(
+        "scrapy.utils.project",
+        {
+            "closest_scrapy_cfg": closest_scrapy_cfg,
+            "data_path": data_path,
+            "find_projects": find_projects,
+            "get_project_settings": get_project_settings,
+            "inside_project": inside_project,
+            "project_data_dir": project_data_dir,
+        },
+    )
     _module("scrapy.utils.iterators", {"csviter": csviter, "xmliter_lxml": xmliter_lxml})
     _module(
         "scrapy.utils.request",

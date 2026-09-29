@@ -17,8 +17,17 @@ explicit error rather than loading a mixed namespace. Repository differential te
 The shim covers APIs already implemented by SpiderOxide, including requests and responses, items,
 selectors, loaders, spiders and crawl rules, settings, signals, middleware, download handlers,
 pipelines, exporters, feed storage, cache policies, extensions, request fingerprints, and common
-project utilities. Missing APIs remain explicit and are tracked in the main compatibility roadmap;
-the shim does not silently substitute incomplete behavior.
+project utilities. It also installs the `scrapy` executable with project generation, crawl,
+standalone spider, inspection, shell, settings, and benchmark commands. Missing APIs remain
+explicit and are tracked in the main compatibility roadmap; the shim does not silently substitute
+incomplete behavior.
+
+```bash
+scrapy startproject example
+cd example
+scrapy genspider catalog example.com
+scrapy crawl catalog -O items.jsonl:jsonlines
+```
 
 Build the compatibility wheel independently from the repository root:
 

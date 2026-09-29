@@ -110,12 +110,23 @@ namespace, so it remains safe to install beside upstream Scrapy for differential
 [`compat/scrapy/COMPATIBILITY.md`](compat/scrapy/COMPATIBILITY.md) for the supported module surface,
 public roadmap gaps, and explicitly unsupported private internals.
 
+The compatibility distribution also installs the `scrapy` executable. Existing projects can run
+`scrapy crawl`, `scrapy runspider`, `scrapy shell`, and the other Scrapy 2.19 commands unchanged;
+new projects and spiders can be created with `scrapy startproject` and `scrapy genspider`.
+
+```bash
+scrapy startproject example
+cd example
+scrapy genspider catalog example.com
+scrapy crawl catalog -O items.jsonl:jsonlines
+```
+
 ### Scrapy conformance
 
 The version-pinned [conformance suite](conformance/README.md) replays documented public behavior
 against Scrapy 2.19.0 and SpiderOxide's Python and Rust engines in isolated subprocesses. It covers
-HTTP models, request identity, settings, selectors and items, spider utilities, runtime APIs, and a
-real data-URI crawl.
+HTTP models, request identity, settings, selectors and items, spider utilities, runtime APIs,
+command metadata, and a real data-URI crawl.
 
 ```bash
 python -m pip install -r requirements-conformance.txt
@@ -1342,9 +1353,8 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include project and command-line tooling, remaining spider contracts, SOCKS proxy
-support, and Twisted interoperability. Exact third-party component
-compatibility and production hardening also remain ongoing work.
+Known gaps include remaining spider contracts, SOCKS proxy support, and Twisted interoperability.
+Exact third-party component compatibility and production hardening also remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,
 callback, middleware, pipeline, and extension layer. The Python core backend will remain available
