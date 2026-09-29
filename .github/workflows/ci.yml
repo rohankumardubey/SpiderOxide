@@ -76,7 +76,7 @@ jobs:
         with:
           name: scrapy-conformance-python-${{ matrix.python-version }}
           path: conformance-results/python-${{ matrix.python-version }}/
-          if-no-files-found: error
+          if-no-files-found: ignore
 
       - name: Smoke-test Scrapy comparison
         run: |

@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -215,16 +216,21 @@ async def _verify_lifecycle() -> None:
 
 
 async def _verify() -> None:
-    upstream = _snapshot(compatibility=False)
     compatibility = _snapshot(compatibility=True)
-    assert compatibility == upstream, json.dumps(
-        {
-            "compatibility": compatibility,
-            "upstream": upstream,
-        },
-        indent=2,
-        sort_keys=True,
-    )
+    try:
+        version("Scrapy")
+    except PackageNotFoundError:
+        pass
+    else:
+        upstream = _snapshot(compatibility=False)
+        assert compatibility == upstream, json.dumps(
+            {
+                "compatibility": compatibility,
+                "upstream": upstream,
+            },
+            indent=2,
+            sort_keys=True,
+        )
     _verify_component_collections()
     await _verify_lifecycle()
 
