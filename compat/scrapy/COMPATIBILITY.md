@@ -11,6 +11,8 @@ reports in CI.
 - Top-level `Spider`, `Request`, `FormRequest`, `Item`, `Field`, and `Selector` imports
 - Request, response, header, item, selector, loader, link, crawl-rule, settings, signal, and
   statistics modules
+- Scrapy settings priorities, module and environment loading, mutation and freezing, deep copies,
+  component ordering, disabling, replacement, and `from_crawler` construction
 - `SitemapSpider`, `XMLFeedSpider`, `CSVFeedSpider`, and sitemap and feed iterator utilities
 - Asyncio-native crawler runners, standalone crawler processes, spider loading, graceful
   shutdown, task tracking, and runtime component lookup

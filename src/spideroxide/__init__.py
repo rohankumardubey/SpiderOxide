@@ -131,7 +131,7 @@ from .selectors import (
     SelectorList,
     TakeFirst,
 )
-from .settings import Settings
+from .settings import BaseSettings, Settings, SettingsAttribute, get_settings_priority
 from .signals import SignalManager
 from .sitemap import Sitemap, SitemapSpider, sitemap_urls_from_robots
 from .spider import Spider
@@ -174,6 +174,7 @@ __all__ = [
     "BackendUnavailableError",
     "BaseDownloadHandler",
     "BaseItemExporter",
+    "BaseSettings",
     "BaseSpiderMiddleware",
     "BlockingFeedStorage",
     "Bz2Plugin",
@@ -288,6 +289,7 @@ __all__ = [
     "Selector",
     "SelectorList",
     "Settings",
+    "SettingsAttribute",
     "SignalManager",
     "Sitemap",
     "SitemapSpider",
@@ -313,6 +315,7 @@ __all__ = [
     "fingerprint_request",
     "fingerprint_requests",
     "get_retry_request",
+    "get_settings_priority",
     "resolve_backend",
     "sitemap_urls_from_robots",
     "signals",
