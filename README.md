@@ -252,6 +252,62 @@ Factories prefer `from_crawler(crawler, ...)` and otherwise call the class const
 Scrapy namespace, `get_project_settings()` loads uppercase values from `SCRAPY_SETTINGS_MODULE` and
 the supported `SCRAPY_*` project environment variables.
 
+### Add-ons and runtime services
+
+Scrapy 2.19 add-ons work unchanged through the `ADDONS` component-priority mapping. A runner calls
+`update_pre_crawler_settings()` before spider discovery, then each crawler constructs enabled
+add-ons and calls `update_settings()` before extensions and services are built. Add-on settings
+should use the `"addon"` priority so project and spider values can override them:
+
+```python
+class ObservabilityAddon:
+    @classmethod
+    def update_pre_crawler_settings(cls, settings):
+        settings.add_to_list("SPIDER_MODULES", "myproject.spiders")
+
+    def update_settings(self, settings):
+        settings.set("METRICS_ENABLED", True, priority="addon")
+        settings.setdefault_in_component_priority_dict(
+            "SERVICES",
+            MetricsService,
+            200,
+        )
+```
+
+`Crawler.get_addon()` exposes enabled instances. Raising `NotConfigured` from construction or
+`update_settings()` disables the add-on without aborting crawler startup.
+
+Runtime services are a SpiderOxide extension configured through `SERVICES`. They use the same
+component priorities and `from_crawler()` construction rules as Scrapy components. Optional
+`requires` class references define dependencies; services start in dependency order after settings
+freeze and the engine is constructed, then stop in reverse order after engine shutdown. Both hooks
+may be synchronous or asynchronous:
+
+```python
+class DatabaseService:
+    async def start(self): ...
+
+    async def stop(self): ...
+
+
+class IndexService:
+    requires = (DatabaseService,)
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        database = crawler.get_service(DatabaseService)
+        return cls(database)
+
+
+SERVICES = {
+    IndexService: 100,
+    DatabaseService: 200,
+}
+```
+
+Dependency order takes precedence over numeric priority. Missing dependencies and dependency cycles
+fail before the engine starts, and partial startup failures stop already-running services.
+
 ## Feed and sitemap spiders
 
 `SitemapSpider`, `XMLFeedSpider`, and `CSVFeedSpider` follow Scrapy 2.19 callback and override
@@ -1287,7 +1343,7 @@ handlers, extensions, signals, and statistics. Both crawl engines are exercised 
 compatibility suite.
 
 Known gaps include project and command-line tooling, remaining spider contracts, SOCKS proxy
-support, add-on and service APIs, and Twisted interoperability. Exact third-party component
+support, and Twisted interoperability. Exact third-party component
 compatibility and production hardening also remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,

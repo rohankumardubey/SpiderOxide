@@ -13,6 +13,7 @@ reports in CI.
   statistics modules
 - Scrapy settings priorities, module and environment loading, mutation and freezing, deep copies,
   component ordering, disabling, replacement, and `from_crawler` construction
+- Scrapy add-on ordering, pre-crawler and crawler settings hooks, opt-outs, and runtime lookup
 - `SitemapSpider`, `XMLFeedSpider`, `CSVFeedSpider`, and sitemap and feed iterator utilities
 - Asyncio-native crawler runners, standalone crawler processes, spider loading, graceful
   shutdown, task tracking, and runtime component lookup
@@ -27,7 +28,6 @@ reports in CI.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Add-on and service APIs — issue #41
 - Additional exporters and feed-storage classes — issue #44
 - Spider contracts — issue #45
 - Remaining logging, mail, resolver, TLS, and utility APIs — issues #46 and #47
@@ -43,6 +43,10 @@ behavior.
 Completed crawler and runner tasks resolve to SpiderOxide's `CrawlResult` instead of Scrapy's
 `None`. Code that only awaits crawl completion is unchanged; callers may additionally inspect
 items, statistics, and the close reason.
+
+SpiderOxide additionally exposes `scrapy.services.ServiceManager`, the `SERVICES` setting, and
+`Crawler.get_service()` for dependency-ordered crawler services with synchronous or asynchronous
+startup and shutdown hooks. Scrapy 2.19 has no corresponding runtime-service API.
 
 ## Unsupported private APIs
 
