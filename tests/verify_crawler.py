@@ -212,7 +212,7 @@ def _verify_settings() -> None:
     assert settings["VALUE"] == "project"
     settings.set("VALUE", "spider", priority="spider")
     assert settings["VALUE"] == "spider"
-    settings.set("BOOL", "yes")
+    settings.set("BOOL", "true")
     assert settings.getbool("BOOL") is True
     settings.freeze()
     try:

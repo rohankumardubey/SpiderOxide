@@ -204,6 +204,54 @@ applications. Scrapy-compatible projects can keep imports from `scrapy.crawler` 
 `scrapy.spiderloader`; SpiderOxide's orchestration is asyncio-native, while Twisted `Deferred` and
 reactor integration remain outside the compatibility surface.
 
+### Settings and component lifecycle
+
+`Settings` and `BaseSettings` preserve Scrapy 2.19 priorities and mutation rules. Values may come
+from mappings, `(name, value)` iterables, JSON objects, uppercase module attributes, or another
+settings object. Copies are deep, `frozencopy()` creates an immutable snapshot, and
+`copy_to_dict()` removes nested priority metadata for serialization:
+
+```python
+from spideroxide import Settings
+
+settings = Settings({"CONCURRENT_REQUESTS": 32})
+settings.setmodule("myproject.settings", priority="project")
+settings.set("CONCURRENT_REQUESTS", 8, priority="spider")
+
+runtime_settings = settings.frozencopy()
+print(runtime_settings.getint("CONCURRENT_REQUESTS"))  # 8
+```
+
+Spider `custom_settings` are applied at spider priority before extensions are constructed.
+Extensions receive mutable settings through `from_crawler()` and may finish runtime configuration;
+settings are frozen before download handlers, downloader middleware, spider middleware, and item
+pipelines are built. Component mappings use ascending priority, `None` disables inherited entries,
+and matching class objects or import paths replace existing entries.
+
+```python
+class AuditExtension:
+    @classmethod
+    def from_crawler(cls, crawler):
+        crawler.settings.set("AUDIT_ENABLED", True, priority="addon")
+        return cls()
+
+
+settings = Settings(
+    {
+        "EXTENSIONS": {AuditExtension: 100},
+        "DOWNLOADER_MIDDLEWARES": {
+            "myproject.middleware.LegacyMiddleware": None,
+            "myproject.middleware.TraceMiddleware": 200,
+        },
+    }
+)
+```
+
+Factories prefer `from_crawler(crawler, ...)` and otherwise call the class constructor. Returning
+`None` is a configuration error; raising `NotConfigured` cleanly disables that component. Under the
+Scrapy namespace, `get_project_settings()` loads uppercase values from `SCRAPY_SETTINGS_MODULE` and
+the supported `SCRAPY_*` project environment variables.
+
 ## Feed and sitemap spiders
 
 `SitemapSpider`, `XMLFeedSpider`, and `CSVFeedSpider` follow Scrapy 2.19 callback and override

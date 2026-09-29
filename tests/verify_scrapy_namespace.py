@@ -342,7 +342,11 @@ def _verify_project_settings() -> None:
     module.DOWNLOAD_TIMEOUT = 12.5
     sys.modules[module.__name__] = module
     previous = os.environ.get("SCRAPY_SETTINGS_MODULE")
+    previous_project = os.environ.get("SCRAPY_PROJECT")
+    previous_shell = os.environ.get("SCRAPY_PYTHON_SHELL")
     os.environ["SCRAPY_SETTINGS_MODULE"] = module.__name__
+    os.environ["SCRAPY_PROJECT"] = "compatibility"
+    os.environ["SCRAPY_PYTHON_SHELL"] = "python"
     try:
         settings = get_project_settings()
     finally:
@@ -350,9 +354,19 @@ def _verify_project_settings() -> None:
             os.environ.pop("SCRAPY_SETTINGS_MODULE", None)
         else:
             os.environ["SCRAPY_SETTINGS_MODULE"] = previous
+        if previous_project is None:
+            os.environ.pop("SCRAPY_PROJECT", None)
+        else:
+            os.environ["SCRAPY_PROJECT"] = previous_project
+        if previous_shell is None:
+            os.environ.pop("SCRAPY_PYTHON_SHELL", None)
+        else:
+            os.environ["SCRAPY_PYTHON_SHELL"] = previous_shell
         sys.modules.pop(module.__name__, None)
     assert settings.getint("CONCURRENT_REQUESTS") == 7
     assert settings.getfloat("DOWNLOAD_TIMEOUT") == 12.5
+    assert settings["PROJECT"] == "compatibility"
+    assert settings["PYTHON_SHELL"] == "python"
 
 
 class RecordingDownloader:

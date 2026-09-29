@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, MutableMapping
-from dataclasses import dataclass
+import copy
+import importlib
+import json
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping
+from types import ModuleType
 from typing import Any
 
 PRIORITIES = {
@@ -214,68 +217,148 @@ DEFAULT_SETTINGS: dict[str, object] = {
 }
 
 
-@dataclass(slots=True)
-class Setting:
-    value: object
-    priority: int
+def get_settings_priority(priority: int | str) -> int:
+    if isinstance(priority, str):
+        return PRIORITIES[priority]
+    return priority
 
 
-class Settings(MutableMapping[str, object]):
+class SettingsAttribute:
+    def __init__(self, value: object, priority: int) -> None:
+        self.value = value
+        self.priority = (
+            max(value.maxpriority(), priority) if isinstance(value, BaseSettings) else priority
+        )
+
+    def set(self, value: object, priority: int) -> None:
+        if priority < self.priority:
+            return
+        if isinstance(self.value, BaseSettings) and isinstance(value, (BaseSettings, Mapping)):
+            value = BaseSettings(value, priority=priority)
+        self.value = value
+        self.priority = priority
+
+    def __repr__(self) -> str:
+        return f"<SettingsAttribute value={self.value!r} priority={self.priority}>"
+
+
+class BaseSettings(MutableMapping[str, object]):
     def __init__(
         self,
-        values: Mapping[str, object] | None = None,
-        *,
-        include_defaults: bool = True,
+        values: (
+            BaseSettings | Mapping[str, object] | Iterable[tuple[str, object]] | str | None
+        ) = None,
+        priority: int | str = "project",
     ) -> None:
-        self._values: dict[str, Setting] = {}
-        self._frozen = False
-        if include_defaults:
-            self.update_values(DEFAULT_SETTINGS, priority="default")
+        self.frozen = False
+        self.attributes: dict[str, SettingsAttribute] = {}
         if values:
-            self.update_values(values, priority="project")
+            self.update(values, priority)
 
-    @staticmethod
-    def _priority(value: int | str) -> int:
-        if isinstance(value, int):
-            return value
-        try:
-            return PRIORITIES[value]
-        except KeyError as exc:
-            raise ValueError(f"unknown settings priority: {value!r}") from exc
+    def _assert_mutability(self) -> None:
+        if self.frozen:
+            raise TypeError("Trying to modify an immutable Settings object")
 
     def set(self, name: str, value: object, priority: int | str = "project") -> None:
-        if self._frozen:
-            raise TypeError("settings are frozen")
-        numeric_priority = self._priority(priority)
-        current = self._values.get(name)
-        if current is None or numeric_priority >= current.priority:
-            self._values[name] = Setting(value, numeric_priority)
+        self._assert_mutability()
+        numeric_priority = get_settings_priority(priority)
+        if name not in self.attributes:
+            self.attributes[name] = (
+                value
+                if isinstance(value, SettingsAttribute)
+                else SettingsAttribute(value, numeric_priority)
+            )
+        else:
+            self.attributes[name].set(value, numeric_priority)
 
     def update_values(
         self,
         values: Mapping[str, object],
         priority: int | str = "project",
     ) -> None:
-        for name, value in values.items():
+        self.update(values, priority)
+
+    def setdict(
+        self,
+        values: (BaseSettings | Mapping[str, object] | Iterable[tuple[str, object]] | str | None),
+        priority: int | str = "project",
+    ) -> None:
+        self.update(values, priority)
+
+    def update(
+        self,
+        values: (
+            BaseSettings | Mapping[str, object] | Iterable[tuple[str, object]] | str | None
+        ) = None,
+        priority: int | str = "project",
+        **kwargs: object,
+    ) -> None:
+        self._assert_mutability()
+        if isinstance(values, str):
+            values = json.loads(values)
+        if values is not None:
+            if isinstance(values, BaseSettings):
+                for name, value in values.items():
+                    self.set(name, value, values.getpriority(name) or 0)
+            else:
+                items = values.items() if isinstance(values, Mapping) else values
+                for name, value in items:
+                    self.set(name, value, priority)
+        for name, value in kwargs.items():
             self.set(name, value, priority)
 
-    def freeze(self) -> None:
-        self._frozen = True
+    def setmodule(
+        self,
+        module: ModuleType | str,
+        priority: int | str = "project",
+    ) -> None:
+        self._assert_mutability()
+        if isinstance(module, str):
+            module = importlib.import_module(module)
+        for name in dir(module):
+            if name.isupper():
+                self.set(name, getattr(module, name), priority)
 
-    @property
-    def frozen(self) -> bool:
-        return self._frozen
+    def setdefault(
+        self,
+        name: str,
+        default: object = None,
+        priority: int | str = "project",
+    ) -> object:
+        if name not in self:
+            self.set(name, default, priority)
+            return default
+        return self.attributes[name].value
+
+    def delete(self, name: str, priority: int | str = "project") -> None:
+        if name not in self:
+            raise KeyError(name)
+        self._assert_mutability()
+        numeric_priority = get_settings_priority(priority)
+        current_priority = self.getpriority(name)
+        if current_priority is not None and numeric_priority >= current_priority:
+            del self.attributes[name]
+
+    def freeze(self) -> None:
+        self.frozen = True
+
+    def get(self, name: str, default: Any = None) -> Any:
+        value = self[name]
+        return default if value is None else value
 
     def getbool(self, name: str, default: bool = False) -> bool:
         value = self.get(name, default)
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"1", "true", "yes", "on"}:
+        try:
+            return bool(int(value))  # type: ignore[arg-type]
+        except ValueError:
+            if value in {"True", "true"}:
                 return True
-            if normalized in {"0", "false", "no", "off", ""}:
+            if value in {"False", "false"}:
                 return False
-            raise ValueError(f"setting {name} is not a boolean: {value!r}")
-        return bool(value)
+            raise ValueError(
+                "Supported values for boolean settings are 0/1, True/False, "
+                "'0'/'1', 'True'/'False' and 'true'/'false'"
+            ) from None
 
     def getint(self, name: str, default: int = 0) -> int:
         return int(self.get(name, default))
@@ -284,42 +367,121 @@ class Settings(MutableMapping[str, object]):
         return float(self.get(name, default))
 
     def getpriority(self, name: str) -> int | None:
-        setting = self._values.get(name)
+        setting = self.attributes.get(name)
         return None if setting is None else setting.priority
+
+    def maxpriority(self) -> int:
+        if self.attributes:
+            return max(attribute.priority for attribute in self.attributes.values())
+        return get_settings_priority("default")
 
     def getlist(self, name: str, default: list[object] | None = None) -> list[object]:
         value = self.get(name, default or [])
+        if not value:
+            return []
         if isinstance(value, str):
-            return [part.strip() for part in value.split(",") if part.strip()]
+            value = value.split(",")
         return list(value)  # type: ignore[arg-type]
 
     def getdict(self, name: str, default: Mapping[str, Any] | None = None) -> dict[str, Any]:
         value = self.get(name, default or {})
-        if not isinstance(value, Mapping):
-            raise TypeError(f"setting {name} is not a mapping")
+        if isinstance(value, str):
+            value = json.loads(value)
         return dict(value)
 
+    def getdictorlist(
+        self,
+        name: str,
+        default: dict[Any, Any] | list[Any] | tuple[Any, ...] | None = None,
+    ) -> dict[Any, Any] | list[Any]:
+        value = self.get(name, default)
+        if value is None:
+            return {}
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+                if not isinstance(decoded, (dict, list)):
+                    raise ValueError
+                return decoded
+            except ValueError:
+                return value.split(",")
+        if isinstance(value, tuple):
+            return list(value)
+        if not isinstance(value, (dict, list)):
+            raise ValueError(
+                f"Setting {name!r} must be a dict, list, tuple, or string, "
+                f"got {type(value).__name__}: {value!r}"
+            )
+        return copy.deepcopy(value)
+
     def __getitem__(self, name: str) -> object:
-        return self._values[name].value
+        attribute = self.attributes.get(name)
+        return None if attribute is None else attribute.value
 
     def __setitem__(self, name: str, value: object) -> None:
         self.set(name, value)
 
     def __delitem__(self, name: str) -> None:
-        if self._frozen:
-            raise TypeError("settings are frozen")
-        del self._values[name]
+        self._assert_mutability()
+        del self.attributes[name]
 
     def __iter__(self) -> Iterator[str]:
-        return iter(self._values)
+        return iter(self.attributes)
 
     def __len__(self) -> int:
-        return len(self._values)
+        return len(self.attributes)
+
+    def __contains__(self, name: object) -> bool:
+        return name in self.attributes
+
+    def copy(self) -> BaseSettings:
+        return copy.deepcopy(self)
+
+    def frozencopy(self) -> BaseSettings:
+        copied = self.copy()
+        copied.freeze()
+        return copied
+
+    def copy_to_dict(self) -> dict[str, Any]:
+        return self._to_dict()
+
+    def _to_dict(self) -> dict[str, Any]:
+        return {
+            str(name): (
+                value._to_dict() if isinstance(value, BaseSettings) else copy.deepcopy(value)
+            )
+            for name, value in self.items()
+        }
+
+    def pop(self, name: str, default: object = ...) -> object:
+        if name not in self.attributes:
+            if default is ...:
+                raise KeyError(name)
+            return default
+        value = self.attributes[name].value
+        del self[name]
+        return value
+
+
+class Settings(BaseSettings):
+    def __init__(
+        self,
+        values: (
+            BaseSettings | Mapping[str, object] | Iterable[tuple[str, object]] | str | None
+        ) = None,
+        priority: int | str = "project",
+    ) -> None:
+        super().__init__()
+        self.update(DEFAULT_SETTINGS, priority="default")
+        for name, value in tuple(self.items()):
+            if isinstance(value, dict):
+                self.set(name, BaseSettings(value, "default"), "default")
+        self.update(values, priority)
 
     def copy(self) -> Settings:
-        copied = Settings(include_defaults=False)
-        copied._values = {
-            name: Setting(attribute.value, attribute.priority)
-            for name, attribute in self._values.items()
-        }
+        return copy.deepcopy(self)
+
+    def frozencopy(self) -> Settings:
+        copied = self.copy()
+        copied.freeze()
         return copied

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import inspect
 import os
 import sys
@@ -14,15 +13,21 @@ from urllib.parse import urlsplit
 import spideroxide
 from spideroxide import signals as spideroxide_signals
 from spideroxide.api import DupeFilter, Scheduler, fingerprint_request
-from spideroxide.components import load_object
+from spideroxide.components import build_from_crawler, load_object
 from spideroxide.downloader import _response_type
 from spideroxide.middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
     SpiderMiddlewareManager,
 )
-from spideroxide.settings import DEFAULT_SETTINGS, PRIORITIES, Setting
-from spideroxide.settings import Settings as SpiderOxideSettings
+from spideroxide.settings import (
+    DEFAULT_SETTINGS,
+    PRIORITIES,
+    BaseSettings,
+    Settings,
+    SettingsAttribute,
+    get_settings_priority,
+)
 
 
 class ScrapyWarning(Warning):
@@ -45,34 +50,6 @@ class ContractFail(Exception):
 
 class NoActiveSpider(Exception):
     pass
-
-
-class BaseSettings(SpiderOxideSettings):
-    def __init__(
-        self,
-        values: Mapping[str, object] | None = None,
-        priority: int | str = "project",
-    ) -> None:
-        super().__init__(include_defaults=False)
-        if values:
-            self.update_values(values, priority)
-
-    def copy(self) -> BaseSettings:
-        copied = type(self)()
-        for name in self:
-            copied.set(name, self[name], self.getpriority(name) or 0)
-        return copied
-
-
-class Settings(BaseSettings):
-    def __init__(
-        self,
-        values: Mapping[str, object] | None = None,
-        priority: int | str = "project",
-    ) -> None:
-        SpiderOxideSettings.__init__(self)
-        if values:
-            self.update_values(values, priority)
 
 
 class RequestFingerprinter:
@@ -166,16 +143,6 @@ class MarshalLifoDiskQueue(_QueueMarker):
     pass
 
 
-def build_from_crawler(component: type, crawler: object, *args: object, **kwargs: object) -> object:
-    factory = getattr(component, "from_crawler", None)
-    if factory is not None:
-        return factory(crawler, *args, **kwargs)
-    from_settings = getattr(component, "from_settings", None)
-    if from_settings is not None:
-        return from_settings(crawler.settings, *args, **kwargs)
-    return component(*args, **kwargs)
-
-
 def global_object_name(value: object) -> str:
     return f"{value.__module__}.{value.__qualname__}"  # type: ignore[attr-defined]
 
@@ -221,11 +188,22 @@ def arg_to_iter(value: object) -> Iterable[object]:
 def get_project_settings() -> Settings:
     settings = Settings()
     module_name = os.environ.get("SCRAPY_SETTINGS_MODULE")
-    if not module_name:
-        return settings
-    module = importlib.import_module(module_name)
-    values = {name: value for name, value in vars(module).items() if name.isupper()}
-    settings.update_values(values, priority="project")
+    if module_name:
+        settings.setmodule(module_name, priority="project")
+    valid_envvars = {
+        "CHECK",
+        "PROJECT",
+        "PYTHON_SHELL",
+        "SETTINGS_MODULE",
+    }
+    settings.setdict(
+        {
+            name.removeprefix("SCRAPY_"): value
+            for name, value in os.environ.items()
+            if name.startswith("SCRAPY_") and name.removeprefix("SCRAPY_") in valid_envvars
+        },
+        priority="project",
+    )
     return settings
 
 
@@ -557,9 +535,9 @@ def install() -> None:
         {
             "BaseSettings": BaseSettings,
             "Settings": Settings,
-            "SettingsAttribute": Setting,
+            "SettingsAttribute": SettingsAttribute,
             "SETTINGS_PRIORITIES": PRIORITIES,
-            "get_settings_priority": Settings._priority,
+            "get_settings_priority": get_settings_priority,
         },
         package=True,
     )
