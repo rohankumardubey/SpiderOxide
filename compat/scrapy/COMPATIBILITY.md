@@ -9,6 +9,8 @@ documented imports to SpiderOxide implementations without installing or importin
 - Request, response, header, item, selector, loader, link, crawl-rule, settings, signal, and
   statistics modules
 - `SitemapSpider`, `XMLFeedSpider`, `CSVFeedSpider`, and sitemap and feed iterator utilities
+- Asyncio-native crawler runners, standalone crawler processes, spider loading, graceful
+  shutdown, task tracking, and runtime component lookup
 - Built-in downloader and spider middleware modules and their Scrapy 2.19 class paths
 - File and image pipelines, item exporters, feed storage, post-processing, cache policies, and
   operational extensions implemented by SpiderOxide
@@ -20,7 +22,6 @@ documented imports to SpiderOxide implementations without installing or importin
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- `CrawlerProcess`, async crawler variants, spider loading, and process lifecycle — issue #37
 - Add-on and service APIs — issue #41
 - Additional exporters and feed-storage classes — issue #44
 - Spider contracts — issue #45
@@ -31,6 +32,12 @@ The shim intentionally omits public APIs that SpiderOxide has not implemented ye
 
 Importing one of these APIs fails normally instead of returning a placeholder with incorrect
 behavior.
+
+## Additive behavior
+
+Completed crawler and runner tasks resolve to SpiderOxide's `CrawlResult` instead of Scrapy's
+`None`. Code that only awaits crawl completion is unchanged; callers may additionally inspect
+items, statistics, and the close reason.
 
 ## Unsupported private APIs
 

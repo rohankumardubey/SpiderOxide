@@ -11,7 +11,10 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from types import ModuleType
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPAT_SRC = ROOT / "compat" / "scrapy" / "src"
@@ -23,12 +26,19 @@ os.environ["SPIDEROXIDE_SCRAPY_COMPAT_ALLOW_CONFLICT"] = "1"
 import scrapy
 from itemadapter import ItemAdapter
 from scrapy import Field, FormRequest, Item, Request, Selector, Spider
-from scrapy.crawler import CrawlerRunner
+from scrapy.crawler import (
+    AsyncCrawlerProcess,
+    AsyncCrawlerRunner,
+    Crawler,
+    CrawlerProcess,
+    CrawlerRunner,
+)
 from scrapy.downloadermiddlewares.retry import RetryMiddleware
 from scrapy.http import Headers, HtmlResponse, JsonResponse, Response, XmlRpcRequest
 from scrapy.linkextractors import IGNORED_EXTENSIONS, LinkExtractor
 from scrapy.loader import ItemLoader
 from scrapy.settings import SETTINGS_PRIORITIES, Settings
+from scrapy.spiderloader import SpiderLoader
 from scrapy.spidermiddlewares.referer import RefererMiddleware
 from scrapy.spiders import CSVFeedSpider, SitemapSpider, XMLFeedSpider
 from scrapy.utils.misc import load_object
@@ -51,6 +61,11 @@ SIGNATURE_TARGETS = {
     "request_from_dict": request_from_dict,
     "request_to_curl": request_to_curl,
 }
+
+assert issubclass(CrawlerRunner, AsyncCrawlerRunner)
+assert issubclass(CrawlerProcess, AsyncCrawlerProcess)
+assert Crawler.__name__ == "Crawler"
+assert SpiderLoader.__name__ == "SpiderLoader"
 
 
 def _api_snapshot() -> dict[str, object]:

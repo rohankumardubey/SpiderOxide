@@ -58,6 +58,7 @@ remote-media = [
 dev = [
     "maturin>=1.7,<2",
     "ruff>=0.9,<1",
+    "tomli>=2,<3; python_version < '3.11'",
 ]
 benchmark = [
     "Scrapy>=2.17,<3",

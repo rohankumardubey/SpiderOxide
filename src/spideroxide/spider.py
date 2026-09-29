@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Iterable, Mapping
 from typing import TYPE_CHECKING, Any, ClassVar
+from urllib.parse import urlsplit
 
 from .http import Request, Response
 
@@ -38,6 +39,17 @@ class Spider:
     def update_settings(cls, settings: Settings) -> None:
         if cls.custom_settings:
             settings.update_values(cls.custom_settings, priority="spider")
+
+    @classmethod
+    def handles_request(cls, request: Request) -> bool:
+        allowed_domains = getattr(cls, "allowed_domains", ())
+        if not allowed_domains:
+            return True
+        hostname = (urlsplit(request.url).hostname or "").lower()
+        return any(
+            hostname == str(domain).lower() or hostname.endswith(f".{str(domain).lower()}")
+            for domain in allowed_domains
+        )
 
     @property
     def logger(self) -> logging.Logger:

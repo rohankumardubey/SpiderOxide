@@ -140,6 +140,52 @@ print(result.stats)
 `Spider.start()` may also be implemented as an asynchronous generator. Requests begin downloading
 as they are yielded, so startup does not need to finish before callbacks run.
 
+### Running and embedding crawlers
+
+Use `AsyncCrawlerRunner` (or its `CrawlerRunner` alias) to schedule crawls on an application's
+existing event loop. Crawls may run concurrently, and `join()` waits for every active crawler:
+
+```python
+import asyncio
+
+from spideroxide import AsyncCrawlerRunner
+
+
+async def crawl_all():
+    runner = AsyncCrawlerRunner({"CONCURRENT_REQUESTS": 32})
+    first = runner.crawl(ProductsSpider)
+    second = runner.crawl(PricesSpider)
+    await runner.join()
+    return first.result(), second.result()
+
+
+products, prices = asyncio.run(crawl_all())
+```
+
+`runner.stop()` gracefully asks all active engines to close and waits for their cleanup. Individual
+`Crawler` objects expose `stop_async()` for the same lifecycle. A crawler object is single-use;
+create a new one for every run. As a SpiderOxide extension, completed crawler and runner tasks
+resolve to `CrawlResult` instead of Scrapy's `None`; applications that only await completion behave
+unchanged, while callers may inspect exported items, crawl statistics, and the close reason.
+
+For a synchronous application entry point, `CrawlerProcess` owns its event loop and blocks in
+`start()` until all scheduled crawls finish:
+
+```python
+from spideroxide import CrawlerProcess
+
+process = CrawlerProcess({"CONCURRENT_REQUESTS": 32})
+process.crawl(ProductsSpider)
+process.crawl(PricesSpider)
+results = process.start()
+```
+
+Use a runner rather than a process when an event loop is already running. `SpiderLoader` discovers
+spiders recursively from `SPIDER_MODULES`, allowing `runner.crawl("spider-name")` in project-style
+applications. Scrapy-compatible projects can keep imports from `scrapy.crawler` and
+`scrapy.spiderloader`; SpiderOxide's orchestration is asyncio-native, while Twisted `Deferred` and
+reactor integration remain outside the compatibility surface.
+
 ## Feed and sitemap spiders
 
 `SitemapSpider`, `XMLFeedSpider`, and `CSVFeedSpider` follow Scrapy 2.19 callback and override
