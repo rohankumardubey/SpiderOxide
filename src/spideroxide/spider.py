@@ -15,6 +15,8 @@ class Spider:
     name: ClassVar[str]
     start_urls: ClassVar[Iterable[str]] = ()
     custom_settings: ClassVar[Mapping[str, object] | None] = None
+    crawler: Crawler | None
+    settings: Settings
 
     def __init__(self, name: str | None = None, **kwargs: object) -> None:
         spider_name = name or getattr(type(self), "name", None)
@@ -29,6 +31,7 @@ class Spider:
     def from_crawler(cls, crawler: Crawler, *args: object, **kwargs: object) -> Spider:
         spider = cls(*args, **kwargs)
         spider.crawler = crawler
+        spider.settings = crawler.settings
         return spider
 
     @classmethod

@@ -30,6 +30,7 @@ from scrapy.linkextractors import IGNORED_EXTENSIONS, LinkExtractor
 from scrapy.loader import ItemLoader
 from scrapy.settings import SETTINGS_PRIORITIES, Settings
 from scrapy.spidermiddlewares.referer import RefererMiddleware
+from scrapy.spiders import CSVFeedSpider, SitemapSpider, XMLFeedSpider
 from scrapy.utils.misc import load_object
 from scrapy.utils.project import get_project_settings
 from scrapy.utils.python import to_bytes, to_unicode
@@ -263,11 +264,15 @@ def _verify_import_surface() -> None:
         "scrapy.spidermiddlewares.referer",
         "scrapy.spidermiddlewares.start",
         "scrapy.spidermiddlewares.urllength",
+        "scrapy.spiders.feed",
+        "scrapy.spiders.sitemap",
+        "scrapy.utils.iterators",
         "scrapy.utils.misc",
         "scrapy.utils.project",
         "scrapy.utils.python",
         "scrapy.utils.request",
         "scrapy.utils.response",
+        "scrapy.utils.sitemap",
         "scrapy.utils.spider",
         "scrapy.utils.trackref",
         "scrapy.utils.url",
@@ -278,6 +283,9 @@ def _verify_import_surface() -> None:
     assert load_object("scrapy.downloadermiddlewares.retry.RetryMiddleware") is RetryMiddleware
     assert load_object("scrapy.spidermiddlewares.referer.RefererMiddleware") is RefererMiddleware
     assert load_object("scrapy.squeues.LifoMemoryQueue").__name__ == "LifoMemoryQueue"
+    assert load_object("scrapy.spiders.feed.XMLFeedSpider") is XMLFeedSpider
+    assert load_object("scrapy.spiders.feed.CSVFeedSpider") is CSVFeedSpider
+    assert load_object("scrapy.spiders.sitemap.SitemapSpider") is SitemapSpider
 
 
 class Product(Item):

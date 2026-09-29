@@ -69,6 +69,7 @@ from .feedexport import (
     XmlItemExporter,
 )
 from .feedpostprocessing import Bz2Plugin, GzipPlugin, LZMAPlugin, PostProcessingManager
+from .feedspiders import CSVFeedSpider, XMLFeedSpider
 from .headers import Headers
 from .http import (
     FormRequest,
@@ -126,6 +127,7 @@ from .selectors import (
 )
 from .settings import Settings
 from .signals import SignalManager
+from .sitemap import Sitemap, SitemapSpider, sitemap_urls_from_robots
 from .spider import Spider
 from .spidermiddlewares import (
     BaseSpiderMiddleware,
@@ -171,6 +173,7 @@ __all__ = [
     "Compose",
     "CoreStats",
     "CookiesMiddleware",
+    "CSVFeedSpider",
     "Crawler",
     "CrawlerRunner",
     "CrawlSpider",
@@ -276,6 +279,8 @@ __all__ = [
     "SelectorList",
     "Settings",
     "SignalManager",
+    "Sitemap",
+    "SitemapSpider",
     "Spider",
     "SpiderOxideError",
     "StatsCollector",
@@ -290,6 +295,7 @@ __all__ = [
     "UrlLengthMiddleware",
     "UserAgentMiddleware",
     "XmlResponse",
+    "XMLFeedSpider",
     "XmlItemExporter",
     "fingerprint",
     "fingerprint_batch",
@@ -297,5 +303,6 @@ __all__ = [
     "fingerprint_requests",
     "get_retry_request",
     "resolve_backend",
+    "sitemap_urls_from_robots",
     "signals",
 ]

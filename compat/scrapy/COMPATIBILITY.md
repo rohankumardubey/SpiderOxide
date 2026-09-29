@@ -8,6 +8,7 @@ documented imports to SpiderOxide implementations without installing or importin
 - Top-level `Spider`, `Request`, `FormRequest`, `Item`, `Field`, and `Selector` imports
 - Request, response, header, item, selector, loader, link, crawl-rule, settings, signal, and
   statistics modules
+- `SitemapSpider`, `XMLFeedSpider`, `CSVFeedSpider`, and sitemap and feed iterator utilities
 - Built-in downloader and spider middleware modules and their Scrapy 2.19 class paths
 - File and image pipelines, item exporters, feed storage, post-processing, cache policies, and
   operational extensions implemented by SpiderOxide
@@ -19,7 +20,6 @@ documented imports to SpiderOxide implementations without installing or importin
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- `SitemapSpider`, `XMLFeedSpider`, and `CSVFeedSpider` — issue #36
 - `CrawlerProcess`, async crawler variants, spider loading, and process lifecycle — issue #37
 - Add-on and service APIs — issue #41
 - Additional exporters and feed-storage classes — issue #44
@@ -45,4 +45,3 @@ including:
 
 Projects that depend on these surfaces must continue using upstream Scrapy until the dependency is
 removed or an explicit compatibility API is added.
-
