@@ -157,7 +157,7 @@
     {
       "id": "cli-project-tooling",
       "title": "CLI commands and project generators",
-      "status": "unsupported",
+      "status": "adapted",
       "upstream_tests": [
         "tests/test_command_crawl.py",
         "tests/test_command_fetch.py",
@@ -169,7 +169,7 @@
         "tests/test_command_version.py",
         "tests/test_commands.py"
       ],
-      "rationale": "The scrapy executable and project command surface are tracked by issue #40."
+      "rationale": "Command metadata is compared directly with Scrapy 2.19, while subprocess integration covers dispatch, generated projects, crawls, feed output, and inspection commands."
     },
     {
       "id": "addons-services",

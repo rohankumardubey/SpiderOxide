@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import inspect
 import json
 import platform
@@ -374,6 +375,34 @@ def _real_crawl(backend: str) -> dict[str, object]:
     }
 
 
+def _cli_project_tooling() -> dict[str, object]:
+    names = (
+        "bench",
+        "check",
+        "crawl",
+        "edit",
+        "fetch",
+        "genspider",
+        "list",
+        "parse",
+        "runspider",
+        "settings",
+        "shell",
+        "startproject",
+        "version",
+        "view",
+    )
+    commands = {}
+    for name in names:
+        command = importlib.import_module(f"scrapy.commands.{name}").Command()
+        commands[name] = {
+            "requires_crawler_process": command.requires_crawler_process,
+            "requires_project": command.requires_project,
+            "short_desc": command.short_desc(),
+        }
+    return commands
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -385,6 +414,7 @@ def main() -> None:
     args = parser.parse_args()
     cases = {
         "addons-services": _addons_services(),
+        "cli-project-tooling": _cli_project_tooling(),
         "http-models": _http_models(),
         "request-identity": _request_identity(),
         "runtime-api": _runtime_api(),
