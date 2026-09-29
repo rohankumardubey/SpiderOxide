@@ -18,6 +18,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
     "ENGINE_BACKEND": "python",
     "ENGINE_MAX_PENDING": 0,
+    "SPIDER_MODULES": [],
+    "SPIDER_LOADER_WARN_ONLY": False,
     "JOBDIR": None,
     "SCHEDULER_DEBUG": False,
     "SCHEDULER_MEMORY_QUEUE": "scrapy.squeues.LifoMemoryQueue",

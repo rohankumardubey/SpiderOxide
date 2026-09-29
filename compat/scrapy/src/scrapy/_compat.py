@@ -356,6 +356,8 @@ def install() -> None:
     from itemloaders import processors
 
     from spideroxide import (
+        AsyncCrawlerProcess,
+        AsyncCrawlerRunner,
         BaseDownloadHandler,
         BaseItemExporter,
         BlockingFeedStorage,
@@ -363,6 +365,9 @@ def install() -> None:
         CloseSpider,
         CookiesMiddleware,
         CoreStats,
+        Crawler,
+        CrawlerProcess,
+        CrawlerRunner,
         CrawlSpider,
         CSVFeedSpider,
         CsvItemExporter,
@@ -446,6 +451,7 @@ def install() -> None:
         Sitemap,
         SitemapSpider,
         Spider,
+        SpiderLoader,
         SpiderState,
         StartSpiderMiddleware,
         StatsCollector,
@@ -463,7 +469,6 @@ def install() -> None:
         get_retry_request,
         sitemap_urls_from_robots,
     )
-    from spideroxide.crawler import Crawler, CrawlerRunner
     from spideroxide.extensions import ExtensionManager
     from spideroxide.iterators import csviter, xmliter_lxml
     from spideroxide.linkextractors import IGNORED_EXTENSIONS
@@ -568,10 +573,14 @@ def install() -> None:
     _module(
         "scrapy.crawler",
         {
+            "AsyncCrawlerProcess": AsyncCrawlerProcess,
+            "AsyncCrawlerRunner": AsyncCrawlerRunner,
             "Crawler": Crawler,
+            "CrawlerProcess": CrawlerProcess,
             "CrawlerRunner": CrawlerRunner,
         },
     )
+    _module("scrapy.spiderloader", {"SpiderLoader": SpiderLoader})
     _module(
         "scrapy.statscollectors",
         {

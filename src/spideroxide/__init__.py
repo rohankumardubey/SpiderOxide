@@ -17,7 +17,13 @@ from .backend import (
 )
 from .cookies import CookiesMiddleware
 from .crawl import CrawlSpider, Rule
-from .crawler import Crawler, CrawlerRunner
+from .crawler import (
+    AsyncCrawlerProcess,
+    AsyncCrawlerRunner,
+    Crawler,
+    CrawlerProcess,
+    CrawlerRunner,
+)
 from .depth import DepthMiddleware
 from .downloader import Downloader, HttpxDownloader, RustDownloader
 from .downloadermiddlewares import (
@@ -129,6 +135,7 @@ from .settings import Settings
 from .signals import SignalManager
 from .sitemap import Sitemap, SitemapSpider, sitemap_urls_from_robots
 from .spider import Spider
+from .spiderloader import SpiderLoader
 from .spidermiddlewares import (
     BaseSpiderMiddleware,
     DefaultReferrerPolicy,
@@ -161,6 +168,8 @@ from .types import (
 
 __all__ = [
     "BACKEND_ENV_VAR",
+    "AsyncCrawlerProcess",
+    "AsyncCrawlerRunner",
     "BackendChoice",
     "BackendUnavailableError",
     "BaseDownloadHandler",
@@ -175,6 +184,7 @@ __all__ = [
     "CookiesMiddleware",
     "CSVFeedSpider",
     "Crawler",
+    "CrawlerProcess",
     "CrawlerRunner",
     "CrawlSpider",
     "CrawlResult",
@@ -282,6 +292,7 @@ __all__ = [
     "Sitemap",
     "SitemapSpider",
     "Spider",
+    "SpiderLoader",
     "SpiderOxideError",
     "StatsCollector",
     "StartSpiderMiddleware",
