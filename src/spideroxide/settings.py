@@ -23,6 +23,9 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "ENGINE_MAX_PENDING": 0,
     "SPIDER_MODULES": [],
     "SPIDER_LOADER_WARN_ONLY": False,
+    "ADDONS": {},
+    "SERVICES_BASE": {},
+    "SERVICES": {},
     "JOBDIR": None,
     "SCHEDULER_DEBUG": False,
     "SCHEDULER_MEMORY_QUEUE": "scrapy.squeues.LifoMemoryQueue",
@@ -413,6 +416,102 @@ class BaseSettings(MutableMapping[str, object]):
                 f"got {type(value).__name__}: {value!r}"
             )
         return copy.deepcopy(value)
+
+    def getwithbase(self, name: str) -> BaseSettings:
+        if not isinstance(name, str):
+            raise ValueError(f"Base setting key must be a string, got {name}")
+        combined = BaseSettings()
+        combined.update(self[name + "_BASE"])
+        combined.update(self[name])
+        return combined
+
+    def get_component_priority_dict_with_base(self, name: str) -> BaseSettings:
+        if not isinstance(name, str):
+            raise ValueError(f"Base setting key must be a string, got {name}")
+        from .components import load_object
+
+        normalized: dict[object, tuple[object, object]] = {}
+        for key, value in dict(self[name + "_BASE"] or {}).items():
+            try:
+                identity = load_object(key)
+            except (NameError, TypeError, ValueError):
+                identity = key
+            normalized[identity] = (key, value)
+        for key, value in dict(self[name] or {}).items():
+            try:
+                identity = load_object(key)
+            except (NameError, TypeError, ValueError):
+                identity = key
+            normalized[identity] = (key, value)
+        return BaseSettings(
+            {original: value for original, value in normalized.values() if value is not None}
+        )
+
+    def add_to_list(self, name: str, item: object) -> None:
+        value = self.getlist(name)
+        if item not in value:
+            self.set(name, [*value, item], self.getpriority(name) or 0)
+
+    def remove_from_list(self, name: str, item: object) -> None:
+        value = self.getlist(name)
+        if item not in value:
+            raise ValueError(f"{item!r} not found in the {name} setting ({value!r}).")
+        self.set(
+            name,
+            [value_item for value_item in value if value_item != item],
+            self.getpriority(name) or 0,
+        )
+
+    def set_in_component_priority_dict(
+        self,
+        name: str,
+        component: type,
+        priority: int | None,
+    ) -> None:
+        from .components import load_object
+
+        components = self.getdict(name)
+        for reference in tuple(components):
+            if isinstance(reference, str) and load_object(reference) == component:
+                del components[reference]
+        components[component] = priority
+        self.set(name, components, self.getpriority(name) or 0)
+
+    def setdefault_in_component_priority_dict(
+        self,
+        name: str,
+        component: type,
+        priority: int | None,
+    ) -> None:
+        from .components import load_object
+
+        components = self.getdict(name)
+        if any(load_object(reference) == component for reference in components):
+            return
+        components[component] = priority
+        self.set(name, components, self.getpriority(name) or 0)
+
+    def replace_in_component_priority_dict(
+        self,
+        name: str,
+        old_component: type,
+        new_component: type,
+        priority: int | None = None,
+    ) -> None:
+        from .components import load_object
+
+        components = self.getdict(name)
+        old_priority = None
+        for reference in tuple(components):
+            if load_object(reference) != old_component:
+                continue
+            old_priority = components.pop(reference)
+            if old_priority is None:
+                break
+        if old_priority is None:
+            raise KeyError(f"{old_component} not found in the {name} setting ({components!r}).")
+        components[new_component] = old_priority if priority is None else priority
+        self.set(name, components, self.getpriority(name) or 0)
 
     def __getitem__(self, name: str) -> object:
         attribute = self.attributes.get(name)

@@ -334,6 +334,7 @@ def install() -> None:
     from itemloaders import processors
 
     from spideroxide import (
+        AddonManager,
         AsyncCrawlerProcess,
         AsyncCrawlerRunner,
         BaseDownloadHandler,
@@ -425,6 +426,7 @@ def install() -> None:
         SameOriginPolicy,
         Selector,
         SelectorList,
+        ServiceManager,
         SignalManager,
         Sitemap,
         SitemapSpider,
@@ -558,6 +560,8 @@ def install() -> None:
             "CrawlerRunner": CrawlerRunner,
         },
     )
+    _module("scrapy.addons", {"AddonManager": AddonManager})
+    _module("scrapy.services", {"ServiceManager": ServiceManager})
     _module("scrapy.spiderloader", {"SpiderLoader": SpiderLoader})
     _module(
         "scrapy.statscollectors",

@@ -7,10 +7,12 @@ from collections.abc import Coroutine, Mapping
 from functools import partial
 from typing import Any, TypeVar
 
+from .addons import AddonManager
 from .downloader import Downloader
 from .downloadhandlers import DownloadHandlers
 from .engine import CrawlEngine, CrawlResult, create_engine
 from .extensions import ExtensionManager
+from .services import ServiceManager
 from .settings import Settings
 from .signals import SignalManager
 from .spider import Spider
@@ -36,12 +38,14 @@ class Crawler:
         self.spider_cls = spidercls
         self.settings = settings.copy() if isinstance(settings, Settings) else Settings(settings)
         spidercls.update_settings(self.settings)
+        self.addons = AddonManager(self)
         self.signals = SignalManager()
         self.stats = StatsCollector()
         self.downloader = downloader
         self.spider: Spider | None = None
         self.engine: CrawlEngine | None = None
         self.extensions: ExtensionManager | None = None
+        self.services: ServiceManager | None = None
         self.native_policy_runtime: object | None = None
         self.native_depth_policy: object | None = None
         self.native_download_slots: object | None = None
@@ -66,19 +70,26 @@ class Crawler:
         self.crawling = self._started = True
         self._crawl_task = asyncio.current_task()
         downloader = self.downloader
+        engine_entered = False
+        primary_error: BaseException | None = None
         try:
             self.spider = self.spidercls.from_crawler(self, *args, **kwargs)
+            self.addons.load_settings(self.settings)
             self.extensions = ExtensionManager.from_crawler(self)
+            self.services = ServiceManager.from_crawler(self)
             self.settings.freeze()
             downloader = downloader or DownloadHandlers.from_crawler(self)
             self.downloader = downloader
             self.engine = create_engine(self, self.spider, downloader)
+            await self.services.start()
             if self._stop_requested:
                 self.engine.close_spider("shutdown")
+            engine_entered = True
             self.result = await self.engine.crawl()
             return self.result
-        except BaseException:
-            if self.engine is None:
+        except BaseException as error:
+            primary_error = error
+            if not engine_entered:
                 close = getattr(downloader, "close", None) if downloader is not None else None
                 if close is not None:
                     try:
@@ -90,7 +101,19 @@ class Crawler:
                         )
             raise
         finally:
+            stop_error: BaseException | None = None
+            if self.services is not None:
+                try:
+                    await self.services.stop()
+                except BaseException as error:
+                    self.stats.inc_value("teardown_errors/count")
+                    if primary_error is None:
+                        stop_error = error
+                    else:
+                        logging.getLogger(__name__).exception("Error stopping crawler services")
             self.crawling = False
+            if stop_error is not None:
+                raise stop_error
 
     def stop(self) -> Coroutine[object, object, None]:
         return self.stop_async()
@@ -125,6 +148,17 @@ class Crawler:
             )
         return self._get_component(cls, self.extensions.middlewares)
 
+    def get_addon(self, cls: type[_Component]) -> _Component | None:
+        return self._get_component(cls, self.addons.addons)
+
+    def get_service(self, cls: type[_Component]) -> _Component | None:
+        if self.services is None:
+            raise RuntimeError(
+                "Crawler.get_service() can only be called after "
+                "the service manager has been created."
+            )
+        return self._get_component(cls, self.services.services)
+
     def get_downloader_middleware(self, cls: type[_Component]) -> _Component | None:
         if self.engine is None:
             raise RuntimeError(
@@ -153,6 +187,7 @@ class Crawler:
 class AsyncCrawlerRunner:
     def __init__(self, settings: Settings | Mapping[str, object] | None = None) -> None:
         self.settings = settings.copy() if isinstance(settings, Settings) else Settings(settings)
+        AddonManager.load_pre_crawler_settings(self.settings)
         self.spider_loader = SpiderLoader.from_settings(self.settings)
         self._crawlers: set[Crawler] = set()
         self._active: set[asyncio.Task[CrawlResult]] = set()

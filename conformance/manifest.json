@@ -174,13 +174,13 @@
     {
       "id": "addons-services",
       "title": "Add-ons and runtime services",
-      "status": "unsupported",
+      "status": "adapted",
       "upstream_tests": [
         "tests/test_addons.py",
         "tests/test_middleware.py",
         "tests/test_pipelines.py"
       ],
-      "rationale": "Scrapy add-on and service APIs are tracked by issue #41."
+      "rationale": "Scrapy add-on ordering, settings mutation, factories, opt-outs, and inspection are compared directly; SpiderOxide service lifecycle behavior is exercised on both engines."
     },
     {
       "id": "spider-contracts",

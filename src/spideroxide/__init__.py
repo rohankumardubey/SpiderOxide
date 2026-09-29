@@ -1,6 +1,7 @@
 """Safe, switchable request-processing backends for Python crawlers."""
 
 from . import signals
+from .addons import AddonManager
 from .api import (
     DupeFilter,
     Scheduler,
@@ -131,6 +132,7 @@ from .selectors import (
     SelectorList,
     TakeFirst,
 )
+from .services import ServiceManager
 from .settings import BaseSettings, Settings, SettingsAttribute, get_settings_priority
 from .signals import SignalManager
 from .sitemap import Sitemap, SitemapSpider, sitemap_urls_from_robots
@@ -170,6 +172,7 @@ __all__ = [
     "BACKEND_ENV_VAR",
     "AsyncCrawlerProcess",
     "AsyncCrawlerRunner",
+    "AddonManager",
     "BackendChoice",
     "BackendUnavailableError",
     "BaseDownloadHandler",
@@ -288,6 +291,7 @@ __all__ = [
     "Scheduler",
     "Selector",
     "SelectorList",
+    "ServiceManager",
     "Settings",
     "SettingsAttribute",
     "SignalManager",
