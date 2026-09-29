@@ -364,6 +364,7 @@ def install() -> None:
         CookiesMiddleware,
         CoreStats,
         CrawlSpider,
+        CSVFeedSpider,
         CsvItemExporter,
         DataURIDownloadHandler,
         DefaultHeadersMiddleware,
@@ -442,6 +443,8 @@ def install() -> None:
         Selector,
         SelectorList,
         SignalManager,
+        Sitemap,
+        SitemapSpider,
         Spider,
         SpiderState,
         StartSpiderMiddleware,
@@ -454,12 +457,15 @@ def install() -> None:
         UnsafeUrlPolicy,
         UrlLengthMiddleware,
         UserAgentMiddleware,
+        XMLFeedSpider,
         XmlItemExporter,
         XmlResponse,
         get_retry_request,
+        sitemap_urls_from_robots,
     )
     from spideroxide.crawler import Crawler, CrawlerRunner
     from spideroxide.extensions import ExtensionManager
+    from spideroxide.iterators import csviter, xmliter_lxml
     from spideroxide.linkextractors import IGNORED_EXTENSIONS
     from spideroxide.operational import CloseSpider as CloseSpiderExtension
     from spideroxide.pipelines import FSFilesStore
@@ -522,13 +528,24 @@ def install() -> None:
     _module(
         "scrapy.spiders",
         {
+            "CSVFeedSpider": CSVFeedSpider,
             "CrawlSpider": CrawlSpider,
             "Rule": Rule,
+            "SitemapSpider": SitemapSpider,
             "Spider": Spider,
+            "XMLFeedSpider": XMLFeedSpider,
         },
         package=True,
     )
     _module("scrapy.spiders.crawl", {"CrawlSpider": CrawlSpider, "Rule": Rule})
+    _module(
+        "scrapy.spiders.feed",
+        {
+            "CSVFeedSpider": CSVFeedSpider,
+            "XMLFeedSpider": XMLFeedSpider,
+        },
+    )
+    _module("scrapy.spiders.sitemap", {"SitemapSpider": SitemapSpider})
 
     _module(
         "scrapy.settings",
@@ -794,6 +811,7 @@ def install() -> None:
         },
     )
     _module("scrapy.utils.project", {"get_project_settings": get_project_settings})
+    _module("scrapy.utils.iterators", {"csviter": csviter, "xmliter_lxml": xmliter_lxml})
     _module(
         "scrapy.utils.request",
         {
@@ -806,5 +824,12 @@ def install() -> None:
     )
     _module("scrapy.utils.response", {"response_status_message": response_status_message})
     _module("scrapy.utils.spider", {"iterate_spider_output": iterate_spider_output})
+    _module(
+        "scrapy.utils.sitemap",
+        {
+            "Sitemap": Sitemap,
+            "sitemap_urls_from_robots": sitemap_urls_from_robots,
+        },
+    )
     _module("scrapy.utils.url", {"url_is_from_any_domain": url_is_from_any_domain})
     _module("scrapy.utils.trackref", {"live_refs": live_refs, "object_ref": object_ref})

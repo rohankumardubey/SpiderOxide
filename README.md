@@ -140,6 +140,53 @@ print(result.stats)
 `Spider.start()` may also be implemented as an asynchronous generator. Requests begin downloading
 as they are yielded, so startup does not need to finish before callbacks run.
 
+## Feed and sitemap spiders
+
+`SitemapSpider`, `XMLFeedSpider`, and `CSVFeedSpider` follow Scrapy 2.19 callback and override
+contracts. Sitemap crawls support `robots.txt` discovery, nested and gzip-compressed maps,
+alternate-language links, filters, and regex callback routing:
+
+```python
+from spideroxide import SitemapSpider
+
+
+class CatalogSpider(SitemapSpider):
+    name = "catalog"
+    sitemap_urls = ["https://example.com/robots.txt"]
+    sitemap_rules = [(r"/products/", "parse_product")]
+    sitemap_follow = [r"/catalog-"]
+    sitemap_alternate_links = True
+
+    def parse_product(self, response):
+        return {"url": response.url}
+```
+
+Feed spiders expose `adapt_response`, `process_results`, and row or node parsing hooks:
+
+```python
+from spideroxide import CSVFeedSpider, XMLFeedSpider
+
+
+class ProductXMLSpider(XMLFeedSpider):
+    name = "product-xml"
+    start_urls = ["https://example.com/products.xml"]
+    itertag = "product"
+
+    def parse_node(self, response, selector):
+        return {"name": selector.xpath("name/text()").get()}
+
+
+class ProductCSVSpider(CSVFeedSpider):
+    name = "product-csv"
+    start_urls = ["https://example.com/products.csv"]
+
+    def parse_row(self, response, row):
+        return row
+```
+
+Projects using the compatibility distribution may keep the corresponding
+`from scrapy.spiders import ...` imports unchanged.
+
 ## Items and Item Loaders
 
 `Item` provides a mapping with an explicit field schema. `Field` metadata can configure loader input
