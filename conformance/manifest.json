@@ -185,12 +185,12 @@
     {
       "id": "spider-contracts",
       "title": "Spider contracts",
-      "status": "unsupported",
+      "status": "adapted",
       "upstream_tests": [
         "tests/test_contracts.py",
         "tests/test_command_check.py"
       ],
-      "rationale": "Spider contracts and the check command are tracked by issue #45."
+      "rationale": "Contract discovery, request construction, callback arguments, return and item validation are compared directly; subprocess integration covers custom contracts, async callbacks, reporting, and exit codes."
     },
     {
       "id": "networking-configuration",

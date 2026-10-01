@@ -184,7 +184,7 @@ class Command(ScrapyCommand):
     assert "Scraped Items" in parsed
     assert "'text': 'ok'" in parsed
 
-    assert _run("check", cwd=directory).stdout.endswith("OK\n")
+    assert _run("check", cwd=directory).stderr.rstrip().endswith("OK")
 
 
 def _verify_inspection_commands(directory: Path) -> None:

@@ -248,6 +248,8 @@ def _verify_import_surface() -> None:
         "scrapy.core.downloader.handlers.ftp",
         "scrapy.core.downloader.handlers.http",
         "scrapy.core.downloader.handlers.s3",
+        "scrapy.contracts",
+        "scrapy.contracts.default",
         "scrapy.downloadermiddlewares.cookies",
         "scrapy.downloadermiddlewares.defaultheaders",
         "scrapy.downloadermiddlewares.downloadtimeout",
