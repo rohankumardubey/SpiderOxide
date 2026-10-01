@@ -47,7 +47,7 @@ class UsageError(Exception):
         super().__init__(*args)
 
 
-class ContractFail(Exception):
+class ContractFail(AssertionError):
     pass
 
 

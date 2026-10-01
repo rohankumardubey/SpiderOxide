@@ -318,7 +318,7 @@ def _url_from_selector(selector: Selector) -> str:
     return strip_html5_whitespace(href)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(eq=False, slots=True)
 class Request:
     attributes: ClassVar[tuple[str, ...]] = (
         "url",

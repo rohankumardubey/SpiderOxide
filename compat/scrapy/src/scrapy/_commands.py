@@ -17,10 +17,12 @@ import sys
 import tempfile
 import time
 import webbrowser
+from collections import defaultdict
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from string import Template
 from types import ModuleType
+from unittest import TextTestRunner
 from urllib.parse import urlparse
 
 from itemadapter import ItemAdapter
@@ -28,10 +30,12 @@ from itemadapter import ItemAdapter
 import scrapy
 from scrapy import Request, Spider
 from scrapy.commands import BaseRunSpiderCommand, ScrapyCommand
+from scrapy.contracts import ContractsManager
 from scrapy.exceptions import UsageError
 from scrapy.http import Response
 from scrapy.settings import BaseSettings
 from scrapy.spiderloader import SpiderLoader
+from spideroxide.components import component_references, load_object
 from spideroxide.utils import collect_outputs
 
 PROJECT_FILES = {
@@ -883,34 +887,88 @@ class CheckCommand(ScrapyCommand):
             help="set spider argument (may be repeated)",
         )
 
+    def process_options(self, args: list[str], opts: argparse.Namespace) -> None:
+        super().process_options(args, opts)
+        try:
+            opts.spargs = dict(value.split("=", 1) for value in opts.spargs)
+        except ValueError:
+            raise UsageError(
+                "Invalid -a value, use -a NAME=VALUE",
+                print_help=False,
+            ) from None
+        assert self.settings is not None
+        for setting_name in ("ITEM_PIPELINES", "FEEDS"):
+            setting_value = self.settings.get(setting_name)
+            if isinstance(setting_value, str):
+                try:
+                    setting_value = json.loads(setting_value)
+                except ValueError:
+                    pass
+                else:
+                    self.settings.set(setting_name, setting_value, priority="cmdline")
+        priority = 35
+        self.settings.set("ITEM_PIPELINES", {}, priority=priority)
+        self.settings.set("FEEDS", {}, priority=priority)
+
     def run(self, args: list[str], opts: argparse.Namespace) -> None:
         assert self.settings is not None
-        loader = SpiderLoader.from_settings(self.settings)
-        names = args or loader.list()
-        contracts = []
-        for name in names:
-            spider = loader.load(name)
-            methods = [
-                method_name
-                for method_name, method in inspect.getmembers(spider, inspect.isfunction)
-                if "@" in (inspect.getdoc(method) or "")
-            ]
-            if methods:
-                contracts.append((name, methods))
-        if opts.list:
-            for name, methods in contracts:
-                print(name)
-                for method in methods:
-                    print(f"  * {method}")
-            return
-        if contracts:
-            print(
-                "Spider contracts were discovered, but contract execution is not yet "
-                "supported by SpiderOxide."
+        from scrapy.commands.check import TextTestResult
+
+        references = component_references(
+            self.settings.get_component_priority_dict_with_base("SPIDER_CONTRACTS")
+        )
+        manager = ContractsManager(load_object(reference) for reference in references)
+        runner = TextTestRunner(verbosity=2 if opts.verbose else 1)
+        result = TextTestResult(runner.stream, runner.descriptions, runner.verbosity)
+        methods_by_spider: dict[str, list[str]] = defaultdict(list)
+        process = _process(self)
+        tasks = []
+        originals = {}
+
+        async def start(spider: Spider) -> object:
+            for request in manager.from_spider(spider, result):
+                if request is not None:
+                    yield request
+
+        previous_check = os.environ.get("SCRAPY_CHECK")
+        os.environ["SCRAPY_CHECK"] = "true"
+        try:
+            for spider_name in args or process.spider_loader.list():
+                spider_cls = process.spider_loader.load(spider_name)
+                tested_methods = manager.tested_methods_from_spidercls(spider_cls)
+                if opts.list:
+                    methods_by_spider[spider_cls.name].extend(tested_methods)
+                elif tested_methods:
+                    originals[spider_cls] = spider_cls.start
+                    spider_cls.start = start
+                    tasks.append(process.crawl(spider_cls, **opts.spargs))
+
+            if opts.list:
+                print(
+                    "\n".join(
+                        f"{spider}\n" + "\n".join(f"  * {method}" for method in sorted(methods))
+                        for spider, methods in sorted(methods_by_spider.items())
+                        if methods or opts.verbose
+                    )
+                )
+                return
+
+            started = time.monotonic()
+            process.start()
+            stopped = time.monotonic()
+            result.printErrors()
+            result.printSummary(started, stopped)
+            task_failed = any(task.cancelled() or task.exception() is not None for task in tasks)
+            self.exitcode = int(
+                not result.wasSuccessful() or process.bootstrap_failed or task_failed
             )
-            self.exitcode = 1
-            return
-        print("Ran 0 contracts in 0.000s\n\nOK")
+        finally:
+            for spider_cls, original in originals.items():
+                spider_cls.start = original
+            if previous_check is None:
+                os.environ.pop("SCRAPY_CHECK", None)
+            else:
+                os.environ["SCRAPY_CHECK"] = previous_check
 
 
 class VersionCommand(ScrapyCommand):

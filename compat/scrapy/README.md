@@ -18,7 +18,8 @@ The shim covers APIs already implemented by SpiderOxide, including requests and 
 selectors, loaders, spiders and crawl rules, settings, signals, middleware, download handlers,
 pipelines, exporters, feed storage, cache policies, extensions, request fingerprints, and common
 project utilities. It also installs the `scrapy` executable with project generation, crawl,
-standalone spider, inspection, shell, settings, and benchmark commands. Missing APIs remain
+standalone spider, inspection, shell, settings, contract checking, and benchmark commands. Built-in
+and custom spider contracts support synchronous and asynchronous callbacks. Missing APIs remain
 explicit and are tracked in the main compatibility roadmap; the shim does not silently substitute
 incomplete behavior.
 

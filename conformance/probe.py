@@ -9,10 +9,18 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 from types import SimpleNamespace
 from typing import Any
+from unittest import TestResult
 
 from itemadapter import ItemAdapter
 from scrapy import Field, FormRequest, Item, Request, Selector, Spider
 from scrapy.addons import AddonManager
+from scrapy.contracts import ContractsManager
+from scrapy.contracts.default import (
+    CallbackKeywordArgumentsContract,
+    ReturnsContract,
+    ScrapesContract,
+    UrlContract,
+)
 from scrapy.crawler import (
     AsyncCrawlerProcess,
     AsyncCrawlerRunner,
@@ -20,7 +28,14 @@ from scrapy.crawler import (
     CrawlerProcess,
     CrawlerRunner,
 )
-from scrapy.http import Headers, HtmlResponse, JsonRequest, JsonResponse, Response
+from scrapy.http import (
+    Headers,
+    HtmlResponse,
+    JsonRequest,
+    JsonResponse,
+    Response,
+    TextResponse,
+)
 from scrapy.linkextractors import LinkExtractor
 from scrapy.loader import ItemLoader
 from scrapy.settings import SETTINGS_PRIORITIES, BaseSettings, Settings
@@ -307,6 +322,50 @@ def _spiders_and_utilities() -> dict[str, object]:
     }
 
 
+def _spider_contracts() -> dict[str, object]:
+    class ContractSpider(Spider):
+        name = "contract-conformance"
+
+        def parse(self, response: TextResponse, expected: str) -> dict[str, str]:
+            """Parse a contract response.
+
+            @url data:text/plain,contract
+            @cb_kwargs {"expected": "contract"}
+            @returns items 1 1
+            @scrapes value
+            """
+            return {"value": expected}
+
+    manager = ContractsManager(
+        (
+            UrlContract,
+            CallbackKeywordArgumentsContract,
+            ReturnsContract,
+            ScrapesContract,
+        )
+    )
+    spider = ContractSpider()
+    result = TestResult()
+    request = manager.from_method(spider.parse, result)
+    assert request is not None and request.callback is not None
+    response = TextResponse(
+        request.url,
+        body=b"contract",
+        encoding="utf-8",
+        request=request,
+    )
+    request.callback(response, **request.cb_kwargs)
+    return {
+        "cb_kwargs": request.cb_kwargs,
+        "discovery": manager.tested_methods_from_spidercls(ContractSpider),
+        "dont_filter": request.dont_filter,
+        "errors": len(result.errors),
+        "failures": len(result.failures),
+        "tests": result.testsRun,
+        "url": request.url,
+    }
+
+
 def _runtime_api() -> dict[str, object]:
     targets = {
         "AsyncCrawlerProcess": AsyncCrawlerProcess,
@@ -420,6 +479,7 @@ def main() -> None:
         "runtime-api": _runtime_api(),
         "selectors-items-links": _selectors_items_links(),
         "settings": _settings(),
+        "spider-contracts": _spider_contracts(),
         "spiders-and-utilities": _spiders_and_utilities(),
         "real-crawl": _real_crawl(args.backend),
     }

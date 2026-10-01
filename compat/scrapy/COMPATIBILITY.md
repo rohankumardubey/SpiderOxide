@@ -16,6 +16,8 @@ reports in CI.
 - Scrapy add-on ordering, pre-crawler and crawler settings hooks, opt-outs, and runtime lookup
 - The `scrapy` executable; project and spider generation; crawl, runspider, fetch, view, parse,
   shell, list, edit, settings, version, check, and benchmark command surfaces
+- Spider contract discovery, built-in and custom contracts, synchronous and asynchronous callback
+  validation, and compatible `scrapy check` reporting and exit codes
 - `SitemapSpider`, `XMLFeedSpider`, `CSVFeedSpider`, and sitemap and feed iterator utilities
 - Asyncio-native crawler runners, standalone crawler processes, spider loading, graceful
   shutdown, task tracking, and runtime component lookup
@@ -31,16 +33,12 @@ reports in CI.
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
 - Additional exporters and feed-storage classes — issue #44
-- Spider contracts — issue #45
 - Remaining logging, mail, resolver, TLS, and utility APIs — issues #46 and #47
 - Telnet and remote-control surfaces — issue #48
 - Deferred and reactor integration — issue #50
 
 Importing one of these APIs fails normally instead of returning a placeholder with incorrect
 behavior.
-
-The `check` command is present and reports projects without contracts. Execution of contracts found
-in spider callback docstrings remains part of the spider-contract work tracked by issue #45.
 
 ## Additive behavior
 

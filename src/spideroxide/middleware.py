@@ -457,6 +457,13 @@ class SpiderMiddlewareManager:
 class ItemPipelineManager:
     def __init__(self, crawler: object, pipelines: object) -> None:
         self.pipelines = build_components(pipelines, crawler)
+        for pipeline in self.pipelines:
+            open_spider = getattr(pipeline, "open_spider", None)
+            if open_spider is not None:
+                crawler.signals.connect(open_spider, signal=signals.spider_opened)
+            close_spider = getattr(pipeline, "close_spider", None)
+            if close_spider is not None:
+                crawler.signals.connect(close_spider, signal=signals.spider_closed)
 
     async def process_item(self, item: object, spider: object) -> object:
         current = item

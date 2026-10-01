@@ -121,6 +121,14 @@ scrapy genspider catalog example.com
 scrapy crawl catalog -O items.jsonl:jsonlines
 ```
 
+Spider callback docstrings may keep Scrapy contracts, including custom classes registered through
+`SPIDER_CONTRACTS`. Run them across the project or for one spider with:
+
+```bash
+scrapy check
+scrapy check catalog
+```
+
 ### Scrapy conformance
 
 The version-pinned [conformance suite](conformance/README.md) replays documented public behavior
@@ -1353,8 +1361,8 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include remaining spider contracts, SOCKS proxy support, and Twisted interoperability.
-Exact third-party component compatibility and production hardening also remain ongoing work.
+Known gaps include SOCKS proxy support and Twisted interoperability. Exact third-party component
+compatibility and production hardening also remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,
 callback, middleware, pipeline, and extension layer. The Python core backend will remain available
