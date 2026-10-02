@@ -96,6 +96,19 @@
       "rationale": "The same data-URI spider runs through upstream Scrapy and SpiderOxide's Python and Rust engines."
     },
     {
+      "id": "exporters-feed-storage-media",
+      "title": "Item exporters, feed storage, and media paths",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_exporters.py",
+        "tests/test_feedexport*.py",
+        "tests/test_pipeline_files.py",
+        "tests/test_pipeline_images.py",
+        "tests/test_pipeline_media.py"
+      ],
+      "rationale": "Deterministic snapshots compare field serialization, Python, pretty-print, Pickle, and Marshal exporters, stdout and FTPS storage contracts, constructor signatures, and default file and image paths; integration tests exercise local and remote lifecycle behavior on both engines."
+    },
+    {
       "id": "existing-component-adaptations",
       "title": "Implemented middleware, pipelines, exporters, queues, and extensions",
       "status": "excluded",
@@ -106,17 +119,12 @@
         "tests/test_downloadermiddleware_*.py",
         "tests/test_downloaderslotssettings.py",
         "tests/test_dupefilters.py",
-        "tests/test_exporters.py",
         "tests/test_extension_debug.py",
         "tests/test_extension_memdebug.py",
         "tests/test_extension_memusage.py",
         "tests/test_extension_periodic_log.py",
-        "tests/test_feedexport*.py",
         "tests/test_http_cookies.py",
         "tests/test_logstats.py",
-        "tests/test_pipeline_files.py",
-        "tests/test_pipeline_images.py",
-        "tests/test_pipeline_media.py",
         "tests/test_pqueues.py",
         "tests/test_responsetypes.py",
         "tests/test_robotstxt_interface.py",

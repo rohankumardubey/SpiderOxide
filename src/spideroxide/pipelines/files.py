@@ -466,7 +466,11 @@ class FilesPipeline(MediaPipeline):
             )
         self.store = self._get_store(str(store_uri), crawler)
         super().__init__(download_func, crawler=crawler)
-        resolve = functools.partial(self._key_for_pipe, base_class_name="FilesPipeline")
+        resolve = functools.partial(
+            self._key_for_pipe,
+            base_class_name="FilesPipeline",
+            settings=crawler.settings,
+        )
         self.expires = crawler.settings.getint(resolve("FILES_EXPIRES"), self.EXPIRES)
         urls_field = getattr(self, "FILES_URLS_FIELD", self.DEFAULT_FILES_URLS_FIELD)
         result_field = getattr(self, "FILES_RESULT_FIELD", self.DEFAULT_FILES_RESULT_FIELD)

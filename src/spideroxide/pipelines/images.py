@@ -52,7 +52,11 @@ class ImagesPipeline(FilesPipeline):
         self._Image = Image
         self._ImageOps = ImageOps
         super().__init__(store_uri, download_func, crawler=crawler)
-        resolve = functools.partial(self._key_for_pipe, base_class_name="ImagesPipeline")
+        resolve = functools.partial(
+            self._key_for_pipe,
+            base_class_name="ImagesPipeline",
+            settings=crawler.settings,
+        )
         self.expires = crawler.settings.getint(resolve("IMAGES_EXPIRES"), self.EXPIRES)
         urls_field = getattr(self, "IMAGES_URLS_FIELD", self.DEFAULT_IMAGES_URLS_FIELD)
         result_field = getattr(self, "IMAGES_RESULT_FIELD", self.DEFAULT_IMAGES_RESULT_FIELD)

@@ -485,6 +485,7 @@ def install() -> None:
         LogCount,
         LogStats,
         LZMAPlugin,
+        MarshalItemExporter,
         MediaPipeline,
         MemoryDebugger,
         MemoryUsage,
@@ -498,7 +499,10 @@ def install() -> None:
         OffsiteMiddleware,
         OriginPolicy,
         OriginWhenCrossOriginPolicy,
+        PickleItemExporter,
         PostProcessingManager,
+        PprintItemExporter,
+        PythonItemExporter,
         RedirectMiddleware,
         RefererMiddleware,
         ReferrerPolicy,
@@ -533,6 +537,7 @@ def install() -> None:
         XMLFeedSpider,
         XmlItemExporter,
         XmlResponse,
+        apply_uri_params,
         get_retry_request,
         sitemap_urls_from_robots,
     )
@@ -764,6 +769,10 @@ def install() -> None:
         "CsvItemExporter": CsvItemExporter,
         "JsonItemExporter": JsonItemExporter,
         "JsonLinesItemExporter": JsonLinesItemExporter,
+        "MarshalItemExporter": MarshalItemExporter,
+        "PickleItemExporter": PickleItemExporter,
+        "PprintItemExporter": PprintItemExporter,
+        "PythonItemExporter": PythonItemExporter,
         "XmlItemExporter": XmlItemExporter,
     }
     _module("scrapy.exporters", exporters)
@@ -780,6 +789,7 @@ def install() -> None:
             "ItemFilter": ItemFilter,
             "S3FeedStorage": S3FeedStorage,
             "StdoutFeedStorage": StdoutFeedStorage,
+            "apply_uri_params": apply_uri_params,
         },
     )
     _module(
