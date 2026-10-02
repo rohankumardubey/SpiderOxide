@@ -22,8 +22,9 @@ reports in CI.
 - Asyncio-native crawler runners, standalone crawler processes, spider loading, graceful
   shutdown, task tracking, and runtime component lookup
 - Built-in downloader and spider middleware modules and their Scrapy 2.19 class paths
-- File and image pipelines, item exporters, feed storage, post-processing, cache policies, and
-  operational extensions implemented by SpiderOxide
+- File and image pipelines; Python, pretty-print, JSON, JSON Lines, CSV, XML, Marshal, and Pickle
+  item exporters; filesystem, stdout, FTP, FTPS, S3, and GCS feed storage; post-processing; cache
+  policies; and operational extensions implemented by SpiderOxide
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
   project settings loading, object loading, and common encoding and URL helpers
@@ -32,7 +33,6 @@ reports in CI.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Additional exporters and feed-storage classes — issue #44
 - Remaining logging, mail, resolver, TLS, and utility APIs — issues #46 and #47
 - Telnet and remote-control surfaces — issue #48
 - Deferred and reactor integration — issue #50

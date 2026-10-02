@@ -74,6 +74,7 @@ class MediaPipeline(ABC):
         redirect_key = self._key_for_pipe(
             "MEDIA_ALLOW_REDIRECTS",
             base_class_name="MediaPipeline",
+            settings=crawler.settings,
         )
         self.allow_redirects = crawler.settings.getbool(redirect_key, False)
         self.spiderinfo: MediaPipeline.SpiderInfo | None = None
@@ -83,10 +84,16 @@ class MediaPipeline(ABC):
     def from_crawler(cls, crawler: Crawler) -> MediaPipeline:
         return cls(crawler=crawler)
 
-    def _key_for_pipe(self, key: str, *, base_class_name: str) -> str:
+    def _key_for_pipe(
+        self,
+        key: str,
+        base_class_name: str | None = None,
+        settings: Any = None,
+    ) -> str:
         class_name = self.__class__.__name__
         custom_key = f"{class_name.upper()}_{key}"
-        if class_name == base_class_name or not self.crawler.settings.get(custom_key):
+        configured = settings or self.crawler.settings
+        if not base_class_name or class_name == base_class_name or not configured.get(custom_key):
             return key
         return custom_key
 

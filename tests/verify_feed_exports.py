@@ -4,6 +4,8 @@ import asyncio
 import csv
 import json
 import logging
+import marshal
+import pickle
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -24,6 +26,10 @@ from spideroxide import (
     Field,
     Item,
     JsonLinesItemExporter,
+    MarshalItemExporter,
+    PickleItemExporter,
+    PprintItemExporter,
+    PythonItemExporter,
     Request,
     Response,
     Spider,
@@ -83,6 +89,36 @@ def _verify_item_field_serialization() -> None:
     csv_exporter.export_item(SerializedItem(name="coffee", encoded="café"))
     csv_exporter.finish_exporting()
     assert csv_output.getvalue().decode() == "name,encoded,missing\r\nCOFFEE,café,\r\n"
+
+    python_exporter = PythonItemExporter()
+    nested = FormatItem(
+        name=b"coffee",
+        tags=[FormatItem(name=b"tea")],
+    )
+    assert python_exporter.export_item(nested) == {
+        "name": "coffee",
+        "tags": [{"name": "tea"}],
+    }
+
+    binary_item = FormatItem(name="coffee", value=b"caf\xc3\xa9")
+    pprint_output = BytesIO()
+    PprintItemExporter(pprint_output).export_item(binary_item)
+    assert pprint_output.getvalue() == b"{'name': 'coffee', 'value': b'caf\\xc3\\xa9'}\n"
+
+    pickle_output = BytesIO()
+    PickleItemExporter(pickle_output).export_item(binary_item)
+    assert pickle.loads(pickle_output.getvalue()) == {
+        "name": "coffee",
+        "value": b"caf\xc3\xa9",
+    }
+
+    marshal_output = BytesIO()
+    MarshalItemExporter(marshal_output).export_item(binary_item)
+    marshal_output.seek(0)
+    assert marshal.load(marshal_output) == {
+        "name": "coffee",
+        "value": b"caf\xc3\xa9",
+    }
 
 
 class EmptySpider(Spider):
@@ -162,6 +198,10 @@ def uri_params(params: dict[str, object], spider: Spider) -> dict[str, object]:
 
 
 class UpperLinesExporter(BaseItemExporter):
+    def __init__(self, file: BytesIO, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.file = file
+
     @classmethod
     def from_crawler(
         cls,
@@ -271,6 +311,18 @@ async def _verify_formats(engine: str, directory: Path) -> None:
                 "item_element": "product",
             },
         },
+        f"{template}.marshal": {
+            "format": "marshal",
+            "fields": ["name", "value"],
+            "overwrite": True,
+            "uri_params": uri_params,
+        },
+        f"{template}.pickle": {
+            "format": "pickle",
+            "fields": ["name", "value"],
+            "overwrite": True,
+            "uri_params": uri_params,
+        },
     }
     crawler = await _crawl(
         FormatSpider,
@@ -284,8 +336,8 @@ async def _verify_formats(engine: str, directory: Path) -> None:
     prefix = directory / "format_spider-verified"
     exported_json = json.loads(prefix.with_suffix(".json").read_text())
     assert exported_json == [
-        {"label": "café-1", "score": 1, "created": "2026-08-01 12:30:00"},
-        {"label": "café-2", "score": 2, "created": "2026-08-02 12:30:00"},
+        {"label": "café-1", "score": 1, "created": "2026-08-01T12:30:00"},
+        {"label": "café-2", "score": 2, "created": "2026-08-02T12:30:00"},
     ]
     exported_lines = [
         json.loads(line) for line in prefix.with_suffix(".jl").read_text().splitlines()
@@ -308,15 +360,25 @@ async def _verify_formats(engine: str, directory: Path) -> None:
         ["red", "blue"],
         ["red", "blue"],
     ]
+    with prefix.with_suffix(".marshal").open("rb") as marshal_file:
+        assert [marshal.load(marshal_file), marshal.load(marshal_file)] == [
+            {"name": "café-1", "value": 1},
+            {"name": "café-2", "value": 2},
+        ]
+    with prefix.with_suffix(".pickle").open("rb") as pickle_file:
+        assert [pickle.load(pickle_file), pickle.load(pickle_file)] == [
+            {"name": "café-1", "value": 1},
+            {"name": "café-2", "value": 2},
+        ]
 
     recorder = crawler.feed_signal_recorder
-    assert len(recorder.slots) == 4
+    assert len(recorder.slots) == 6
     assert all(
         itemcount == 2 and batch_id == 1 and not failed
         for _, itemcount, batch_id, failed in recorder.slots
     )
     assert recorder.exporter_closed == 1
-    assert crawler.stats.get_value("feedexport/success_count/FileFeedStorage") == 4
+    assert crawler.stats.get_value("feedexport/success_count/FileFeedStorage") == 6
     assert isinstance(crawler.extensions.get_by_type(FeedExporter), FeedExporter)
 
 
@@ -512,7 +574,8 @@ async def _verify() -> None:
 if __name__ == "__main__":
     asyncio.run(_verify())
     print(
-        "Feed exports passed: JSON, JSON Lines, CSV, XML, fields, encoding, templates, "
-        "batches, empty feeds, append and overwrite, filters, custom components, failures, "
-        "signals, statistics, and engine parity"
+        "Feed exports passed: JSON, JSON Lines, CSV, XML, Marshal, Pickle, Python and "
+        "pretty-print exporters, fields, encoding, templates, batches, empty feeds, append "
+        "and overwrite, filters, custom components, failures, signals, statistics, and "
+        "engine parity"
     )

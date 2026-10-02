@@ -4,9 +4,12 @@ import argparse
 import importlib
 import inspect
 import json
+import marshal
+import pickle
 import platform
 import sys
 from importlib.metadata import PackageNotFoundError, version
+from io import BytesIO
 from types import SimpleNamespace
 from typing import Any
 from unittest import TestResult
@@ -28,6 +31,20 @@ from scrapy.crawler import (
     CrawlerProcess,
     CrawlerRunner,
 )
+from scrapy.exporters import (
+    BaseItemExporter,
+    MarshalItemExporter,
+    PickleItemExporter,
+    PprintItemExporter,
+    PythonItemExporter,
+)
+from scrapy.extensions.feedexport import (
+    FeedSlot,
+    FileFeedStorage,
+    FTPFeedStorage,
+    StdoutFeedStorage,
+    apply_uri_params,
+)
 from scrapy.http import (
     Headers,
     HtmlResponse,
@@ -38,6 +55,8 @@ from scrapy.http import (
 )
 from scrapy.linkextractors import LinkExtractor
 from scrapy.loader import ItemLoader
+from scrapy.pipelines.files import FilesPipeline
+from scrapy.pipelines.images import ImagesPipeline
 from scrapy.settings import SETTINGS_PRIORITIES, BaseSettings, Settings
 from scrapy.spiderloader import SpiderLoader
 from scrapy.utils.python import to_bytes, to_unicode
@@ -190,9 +209,12 @@ def _settings() -> dict[str, object]:
     settings.set("LIST_VALUE", "one,two", priority="command")
     copied = settings.copy()
     copied.set("VALUE", "cmdline", priority="cmdline")
+    settings.set("OPTIONAL_NUMBER", None, priority="command")
     return {
         "bool": settings.getbool("BOOL_TRUE"),
         "copy_independent": copied["VALUE"] != settings["VALUE"],
+        "float_none": settings.getfloat("OPTIONAL_NUMBER"),
+        "int_none": settings.getint("OPTIONAL_NUMBER"),
         "list": settings.getlist("LIST_VALUE"),
         "priorities": SETTINGS_PRIORITIES,
         "priority": settings.getpriority("VALUE"),
@@ -294,6 +316,80 @@ def _selectors_items_links() -> dict[str, object]:
             for link in links
         ],
         "item": ItemAdapter(item).asdict(),
+    }
+
+
+def _exporters_feed_storage_media() -> dict[str, object]:
+    class ExportItem(Item):
+        name = Field()
+        value = Field()
+
+    item = ExportItem(name="café", value=7)
+
+    pprint_file = BytesIO()
+    PprintItemExporter(pprint_file).export_item(item)
+
+    pickle_file = BytesIO()
+    PickleItemExporter(pickle_file).export_item(item)
+
+    marshal_file = BytesIO()
+    MarshalItemExporter(marshal_file).export_item(item)
+    marshal_file.seek(0)
+
+    stdout_file = BytesIO()
+    stdout_storage = StdoutFeedStorage("stdout:", _stdout=stdout_file)
+    opened_stdout = stdout_storage.open(SimpleNamespace())
+    stdout_result = stdout_storage.store(opened_stdout)
+
+    ftp_storage = FTPFeedStorage(
+        "ftps://user:p%40ss@example.test:2121/feeds/items.pickle",
+        use_active_mode=True,
+        feed_options={"overwrite": False},
+    )
+    file_storage = FileFeedStorage(
+        "items.pickle",
+        feed_options={"overwrite": True},
+    )
+
+    request = Request("https://example.test/assets/file.txt?version=2")
+    return {
+        "base_signature": _signature(BaseItemExporter),
+        "feed_slot_signature": _signature(FeedSlot),
+        "file_write_mode": file_storage.write_mode,
+        "ftps": {
+            "active": ftp_storage.use_active_mode,
+            "host": ftp_storage.host,
+            "overwrite": ftp_storage.overwrite,
+            "password": ftp_storage.password,
+            "path": ftp_storage.path,
+            "port": ftp_storage.port,
+            "tls": ftp_storage.tls,
+            "username": ftp_storage.username,
+        },
+        "marshal": marshal.load(marshal_file),
+        "marshal_bytes": marshal_file.getvalue().hex(),
+        "media_paths": {
+            "file": FilesPipeline.file_path(FilesPipeline.__new__(FilesPipeline), request),
+            "image": ImagesPipeline.file_path(ImagesPipeline.__new__(ImagesPipeline), request),
+        },
+        "pickle": pickle.loads(pickle_file.getvalue()),
+        "pickle_bytes": pickle_file.getvalue().hex(),
+        "pprint": pprint_file.getvalue().decode(),
+        "python": PythonItemExporter().export_item(
+            {
+                "bytes": b"caf\xc3\xa9",
+                "nested": [ExportItem(name=b"tea", value=2)],
+            }
+        ),
+        "stdout": {
+            "same_file": opened_stdout is stdout_file,
+            "store_result": stdout_result,
+            "still_open": not stdout_file.closed,
+        },
+        "uri": apply_uri_params(
+            "file:///tmp/a%20b-%(batch_id)03d-100%%.jl",
+            {"batch_id": 7},
+        ),
     }
 
 
@@ -474,6 +570,7 @@ def main() -> None:
     cases = {
         "addons-services": _addons_services(),
         "cli-project-tooling": _cli_project_tooling(),
+        "exporters-feed-storage-media": _exporters_feed_storage_media(),
         "http-models": _http_models(),
         "request-identity": _request_identity(),
         "runtime-api": _runtime_api(),

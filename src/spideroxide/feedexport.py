@@ -4,18 +4,23 @@ import asyncio
 import csv
 import json
 import logging
+import marshal
+import pickle
 import posixpath
+import pprint
 import re
 import sys
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import closing
 from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import field as dataclass_field
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
-from ftplib import FTP, error_perm
+from ftplib import FTP, FTP_TLS, error_perm
 from io import TextIOWrapper
 from pathlib import Path
+from ssl import create_default_context
 from tempfile import NamedTemporaryFile
 from typing import Any, BinaryIO
 from urllib.parse import unquote, urlsplit
@@ -29,10 +34,11 @@ from .components import load_object
 from .exceptions import NotConfigured
 from .feedpostprocessing import PostProcessingManager
 from .http import Request, Response
+from .types import Item
 from .utils import maybe_await
 
 logger = logging.getLogger(__name__)
-_URI_PARAMETER = re.compile(r"%\([^)]+\)[#0\- +]*\d*(?:\.\d+)?[a-zA-Z]")
+_URI_PARAMETER = re.compile(r"%\([^)]+\)[-+ #0]*(?:\d+|\*)?(?:\.(?:\d+|\*))?[diouxXeEfFgGcrsa]")
 
 
 def _item_mapping(item: object) -> dict[str, object]:
@@ -68,8 +74,19 @@ def _path_template_uri(path: Path) -> str:
     return uri
 
 
+def apply_uri_params(uri_template: str, uri_params: Mapping[str, object]) -> str:
+    parts: list[str] = []
+    last = 0
+    for match in _URI_PARAMETER.finditer(uri_template):
+        parts.append(uri_template[last : match.start()].replace("%", "%%"))
+        parts.append(match.group())
+        last = match.end()
+    parts.append(uri_template[last:].replace("%", "%%"))
+    return "".join(parts) % uri_params
+
+
 def _format_uri_template(template: str, params: Mapping[str, object]) -> str:
-    return _URI_PARAMETER.sub(lambda match: match.group() % params, template)
+    return apply_uri_params(template, params)
 
 
 class SpiderOxideJSONEncoder(json.JSONEncoder):
@@ -79,11 +96,11 @@ class SpiderOxideJSONEncoder(json.JSONEncoder):
         if isinstance(value, set):
             return list(value)
         if isinstance(value, datetime):
-            return value.strftime("%Y-%m-%d %H:%M:%S")
+            return value.isoformat()
         if isinstance(value, date):
-            return value.strftime("%Y-%m-%d")
+            return value.isoformat()
         if isinstance(value, time):
-            return value.strftime("%H:%M:%S")
+            return value.isoformat()
         if isinstance(value, Decimal):
             return str(value)
         if isinstance(value, Request):
@@ -99,20 +116,25 @@ class SpiderOxideJSONEncoder(json.JSONEncoder):
 class BaseItemExporter:
     def __init__(
         self,
-        file: BinaryIO,
         *,
-        encoding: str | None = None,
-        fields_to_export: Mapping[str, str] | Iterable[str] | None = None,
-        export_empty_fields: bool = False,
-        indent: int | None = None,
+        dont_fail: bool = False,
         **kwargs: object,
     ) -> None:
-        self.file = file
-        self.encoding = encoding
-        self.fields_to_export = fields_to_export
-        self.export_empty_fields = export_empty_fields
-        self.indent = indent
         self._kwargs = kwargs
+        self._configure(kwargs, dont_fail=dont_fail)
+
+    def _configure(
+        self,
+        options: dict[str, object],
+        *,
+        dont_fail: bool = False,
+    ) -> None:
+        self.encoding = options.pop("encoding", None)
+        self.fields_to_export = options.pop("fields_to_export", None)
+        self.export_empty_fields = bool(options.pop("export_empty_fields", False))
+        self.indent = options.pop("indent", None)
+        if not dont_fail and options:
+            raise TypeError(f"Unexpected options: {', '.join(options)}")
 
     def start_exporting(self) -> None:
         pass
@@ -129,6 +151,51 @@ class BaseItemExporter:
         serializer: Callable[[object], object] = field.get("serializer", lambda item: item)  # type: ignore[assignment]
         return serializer(value)
 
+    @staticmethod
+    def _get_populated_field_names(adapter: ItemAdapter) -> Iterable[str]:
+        populated = set(adapter.keys())
+        declared = (name for name in adapter.field_names() if name in populated)
+        return dict.fromkeys([*declared, *adapter.keys()])
+
+    def get_serialized_fields(
+        self,
+        item: object,
+        default_value: object = None,
+        include_empty: bool | None = None,
+    ) -> Iterable[tuple[str, object]]:
+        include_empty = self.export_empty_fields if include_empty is None else include_empty
+        adapter = ItemAdapter(item)
+        fields = self.fields_to_export
+        if fields is None:
+            field_iter: Iterable[str | tuple[str, str]] = (
+                adapter.field_names() if include_empty else self._get_populated_field_names(adapter)
+            )
+        elif isinstance(fields, Mapping):
+            field_iter = (
+                fields.items()
+                if include_empty
+                else ((name, output) for name, output in fields.items() if name in adapter)
+            )
+        elif include_empty:
+            field_iter = fields
+        else:
+            field_iter = (name for name in fields if name in adapter)
+
+        for field in field_iter:
+            input_name, output_name = (field, field) if isinstance(field, str) else field
+            if input_name in adapter:
+                metadata = adapter.get_field_meta(input_name)
+                yield (
+                    output_name,
+                    self.serialize_field(
+                        metadata,
+                        output_name,
+                        adapter[input_name],
+                    ),
+                )
+            elif include_empty:
+                yield output_name, default_value
+
     def _serialized_fields(
         self,
         item: object,
@@ -136,47 +203,93 @@ class BaseItemExporter:
         default_value: object = None,
         include_empty: bool | None = None,
     ) -> Iterable[tuple[str, object]]:
-        include_empty = self.export_empty_fields if include_empty is None else include_empty
-        adapter = ItemAdapter(item) if ItemAdapter.is_item(item) else None
-        values = dict(adapter.items()) if adapter is not None else _item_mapping(item)
-        fields = self.fields_to_export
-        if fields is None:
-            field_iter: Iterable[str | tuple[str, str]] = (
-                adapter.field_names() if adapter is not None and include_empty else values
-            )
-        elif isinstance(fields, Mapping):
-            field_iter = (
-                fields.items()
-                if include_empty
-                else ((name, output) for name, output in fields.items() if name in values)
-            )
-        elif include_empty:
-            field_iter = fields
-        else:
-            field_iter = (name for name in fields if name in values)
-
-        for field in field_iter:
-            input_name, output_name = (field, field) if isinstance(field, str) else field
-            if input_name in values:
-                metadata = adapter.get_field_meta(input_name) if adapter is not None else {}
-                yield (
-                    output_name,
-                    self.serialize_field(
-                        metadata,
-                        output_name,
-                        values[input_name],
-                    ),
-                )
-            elif include_empty:
-                yield output_name, default_value
+        return self.get_serialized_fields(item, default_value, include_empty)
 
     def export_item(self, item: object) -> None:
         raise NotImplementedError
 
 
+class PythonItemExporter(BaseItemExporter):
+    def _configure(
+        self,
+        options: dict[str, object],
+        *,
+        dont_fail: bool = False,
+    ) -> None:
+        super()._configure(options, dont_fail=dont_fail)
+        if not self.encoding:
+            self.encoding = "utf-8"
+
+    def serialize_field(
+        self,
+        field: Mapping[str, object],
+        name: str,
+        value: object,
+    ) -> object:
+        serializer: Callable[[object], object] = field.get(  # type: ignore[assignment]
+            "serializer",
+            self._serialize_value,
+        )
+        return serializer(value)
+
+    def _serialize_value(self, value: object) -> object:
+        if isinstance(value, Item):
+            return self.export_item(value)
+        if isinstance(value, str):
+            return value
+        if isinstance(value, bytes):
+            return value.decode(self.encoding)
+        if ItemAdapter.is_item(value):
+            return {
+                key: self._serialize_value(item_value)
+                for key, item_value in ItemAdapter(value).items()
+            }
+        if isinstance(value, Iterable):
+            return [self._serialize_value(item_value) for item_value in value]
+        return value
+
+    def export_item(self, item: object) -> dict[str, object]:
+        return dict(self.get_serialized_fields(item))
+
+
+class PprintItemExporter(BaseItemExporter):
+    def __init__(self, file: BinaryIO, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.file = file
+
+    def export_item(self, item: object) -> None:
+        itemdict = dict(self.get_serialized_fields(item))
+        self.file.write((pprint.pformat(itemdict) + "\n").encode())
+
+
+class PickleItemExporter(BaseItemExporter):
+    def __init__(
+        self,
+        file: BinaryIO,
+        protocol: int = 4,
+        **kwargs: object,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.file = file
+        self.protocol = protocol
+
+    def export_item(self, item: object) -> None:
+        pickle.dump(dict(self.get_serialized_fields(item)), self.file, self.protocol)
+
+
+class MarshalItemExporter(BaseItemExporter):
+    def __init__(self, file: BinaryIO, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.file = file
+
+    def export_item(self, item: object) -> None:
+        marshal.dump(dict(self.get_serialized_fields(item)), self.file)
+
+
 class JsonItemExporter(BaseItemExporter):
     def __init__(self, file: BinaryIO, **kwargs: object) -> None:
-        super().__init__(file, **kwargs)
+        super().__init__(dont_fail=True, **kwargs)
+        self.file = file
         encoder_options = dict(self._kwargs)
         encoder_options.setdefault(
             "indent", self.indent if self.indent and self.indent > 0 else None
@@ -210,7 +323,8 @@ class JsonItemExporter(BaseItemExporter):
 
 class JsonLinesItemExporter(BaseItemExporter):
     def __init__(self, file: BinaryIO, **kwargs: object) -> None:
-        super().__init__(file, **kwargs)
+        super().__init__(dont_fail=True, **kwargs)
+        self.file = file
         encoder_options = dict(self._kwargs)
         encoder_options.setdefault("ensure_ascii", not self.encoding)
         self.encoder = SpiderOxideJSONEncoder(**encoder_options)
@@ -230,7 +344,8 @@ class CsvItemExporter(BaseItemExporter):
         errors: str | None = None,
         **kwargs: object,
     ) -> None:
-        super().__init__(file, **kwargs)
+        super().__init__(dont_fail=True, **kwargs)
+        self.file = file
         self.encoding = self.encoding or "utf-8"
         self.include_headers_line = include_headers_line
         self.join_multivalued = join_multivalued
@@ -244,6 +359,8 @@ class CsvItemExporter(BaseItemExporter):
         )
         self.writer = csv.writer(self.stream, **self._kwargs)
         self.headers_written = False
+        self._autodetected_fields = False
+        self._data_loss_warned = False
 
     def _cell(self, value: object) -> object:
         if isinstance(value, (list, tuple)):
@@ -270,19 +387,31 @@ class CsvItemExporter(BaseItemExporter):
     def export_item(self, item: object) -> None:
         if not self.headers_written:
             self.headers_written = True
-            if self.fields_to_export is None:
-                self.fields_to_export = tuple(
-                    ItemAdapter(item).field_names()
-                    if ItemAdapter.is_item(item)
-                    else _item_mapping(item)
-                )
             if self.include_headers_line:
+                if not self.fields_to_export:
+                    self.fields_to_export = tuple(ItemAdapter(item).field_names())
+                    self._autodetected_fields = True
                 headers = (
                     self.fields_to_export.values()
                     if isinstance(self.fields_to_export, Mapping)
                     else self.fields_to_export
                 )
                 self.writer.writerow(headers)
+        if (
+            self._autodetected_fields
+            and self.fields_to_export is not None
+            and not self._data_loss_warned
+        ):
+            dropped_fields = set(ItemAdapter(item).field_names()) - set(self.fields_to_export)
+            if dropped_fields:
+                logger.warning(
+                    "CSVExporter dropped fields %s. To avoid this, fully configure your "
+                    "FEED_EXPORT_FIELDS setting. See: "
+                    "https://docs.scrapy.org/en/latest/topics/feed-exports.html"
+                    "#feed-export-fields",
+                    sorted(dropped_fields),
+                )
+                self._data_loss_warned = True
         fields = self._serialized_fields(item, default_value="", include_empty=True)
         self.writer.writerow(self._row_value(value) for _, value in fields)
 
@@ -299,7 +428,8 @@ class XmlItemExporter(BaseItemExporter):
         root_element: str = "items",
         **kwargs: object,
     ) -> None:
-        super().__init__(file, **kwargs)
+        super().__init__(**kwargs)
+        self.file = file
         if self._kwargs:
             raise TypeError(f"unexpected XML exporter options: {', '.join(self._kwargs)}")
         self.encoding = self.encoding or "utf-8"
@@ -370,29 +500,37 @@ class FileFeedStorage:
         else:
             self.path = Path(uri)
         self.overwrite = bool((feed_options or {}).get("overwrite", False))
+        self.write_mode = "wb" if self.overwrite else "ab"
 
     def open(self, spider: object) -> BinaryIO:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        return self.path.open("wb" if self.overwrite else "ab")
+        return self.path.open(self.write_mode)
 
     def store(self, file: BinaryIO) -> None:
         file.close()
 
 
 class StdoutFeedStorage:
-    def __init__(self, uri: str, *, feed_options: Mapping[str, object] | None = None) -> None:
-        self.uri = uri
+    def __init__(
+        self,
+        uri: str,
+        _stdout: BinaryIO | None = None,
+        *,
+        feed_options: Mapping[str, object] | None = None,
+    ) -> None:
+        self._stdout = _stdout or sys.stdout.buffer
         if feed_options and feed_options.get("overwrite", False) is True:
             logger.warning(
-                "Standard output storage does not support overwriting. "
-                "Remove the overwrite option or set it to False."
+                "Standard output (stdout) storage does not support overwriting. "
+                "To suppress this warning, remove the overwrite option from your "
+                "FEEDS setting, or set it to False."
             )
 
     def open(self, spider: object) -> BinaryIO:
-        return sys.stdout.buffer
+        return self._stdout
 
     def store(self, file: BinaryIO) -> None:
-        file.flush()
+        pass
 
 
 class BlockingFeedStorage(ABC):
@@ -424,9 +562,11 @@ class S3FeedStorage(BlockingFeedStorage):
         feed_options: Mapping[str, object] | None = None,
         session_token: str | None = None,
         region_name: str | None = None,
+        max_pool_connections: int | None = None,
     ) -> None:
         try:
             import boto3.session
+            from botocore.config import Config
         except ImportError:
             raise NotConfigured("missing boto3 library") from None
         parsed = urlsplit(uri)
@@ -440,6 +580,7 @@ class S3FeedStorage(BlockingFeedStorage):
         self.acl = acl
         self.endpoint_url = endpoint_url
         self.region_name = region_name
+        self.max_pool_connections = max_pool_connections
         self.s3_client = boto3.session.Session().client(
             "s3",
             aws_access_key_id=self.access_key,
@@ -447,10 +588,16 @@ class S3FeedStorage(BlockingFeedStorage):
             aws_session_token=self.session_token,
             endpoint_url=self.endpoint_url,
             region_name=self.region_name,
+            config=(
+                Config(max_pool_connections=self.max_pool_connections)
+                if self.max_pool_connections is not None
+                else None
+            ),
         )
         if feed_options and feed_options.get("overwrite", True) is False:
             logger.warning(
-                "S3 storage does not support appending; the remote object will be replaced."
+                "S3 does not support appending to files. To suppress this warning, "
+                "remove the overwrite option from your FEEDS setting or set it to True."
             )
 
     @classmethod
@@ -470,6 +617,8 @@ class S3FeedStorage(BlockingFeedStorage):
             acl=settings.get("FEED_STORAGE_S3_ACL") or None,
             endpoint_url=settings.get("AWS_ENDPOINT_URL") or None,
             region_name=settings.get("AWS_REGION_NAME") or None,
+            max_pool_connections=settings.getint("AWS_MAX_POOL_CONNECTIONS")
+            or settings.getint("REACTOR_THREADPOOL_MAXSIZE"),
             feed_options=feed_options,
         )
 
@@ -506,7 +655,8 @@ class GCSFeedStorage(BlockingFeedStorage):
         self.blob_name = parsed.path[1:]
         if feed_options and feed_options.get("overwrite", True) is False:
             logger.warning(
-                "GCS storage does not support appending; the remote object will be replaced."
+                "GCS does not support appending to files. To suppress this warning, "
+                "remove the overwrite option from your FEEDS setting or set it to True."
             )
 
     @classmethod
@@ -562,10 +712,14 @@ def _ftp_store_file(
     password: str,
     use_active_mode: bool,
     overwrite: bool,
+    tls: bool = False,
 ) -> None:
-    with FTP() as ftp, closing(file):
+    ftp = FTP_TLS(context=create_default_context()) if tls else FTP()
+    with ftp, closing(file):
         ftp.connect(host, port)
         ftp.login(username, password)
+        if isinstance(ftp, FTP_TLS):
+            ftp.prot_p()
         if use_active_mode:
             ftp.set_pasv(False)
         file.seek(0)
@@ -591,6 +745,7 @@ class FTPFeedStorage(BlockingFeedStorage):
         self.username = parsed.username or ""
         self.password = unquote(parsed.password or "")
         self.path = parsed.path
+        self.tls = parsed.scheme == "ftps"
         self.use_active_mode = use_active_mode
         self.overwrite = not feed_options or bool(feed_options.get("overwrite", True))
 
@@ -618,11 +773,13 @@ class FTPFeedStorage(BlockingFeedStorage):
             password=self.password,
             use_active_mode=self.use_active_mode,
             overwrite=self.overwrite,
+            tls=self.tls,
         )
 
 
 class ItemFilter:
     def __init__(self, feed_options: Mapping[str, object] | None = None) -> None:
+        self.feed_options = feed_options
         references = (feed_options or {}).get("item_classes") or ()
         if isinstance(references, (str, type)):
             references = (references,)
@@ -646,14 +803,15 @@ class FeedSlot:
     filter: object
     feed_options: dict[str, object]
     spider: object
-    crawler: object
     exporters: dict[str, object]
-    file: BinaryIO | None = None
-    exporter: BaseItemExporter | None = None
-    itemcount: int = 0
-    exporting: bool = False
-    failed: bool = False
-    closed: bool = False
+    settings: object
+    crawler: object
+    file: BinaryIO | None = dataclass_field(default=None, init=False)
+    exporter: BaseItemExporter | None = dataclass_field(default=None, init=False)
+    itemcount: int = dataclass_field(default=0, init=False)
+    exporting: bool = dataclass_field(default=False, init=False)
+    failed: bool = dataclass_field(default=False, init=False)
+    closed: bool = dataclass_field(default=False, init=False)
 
     def start_exporting(self) -> None:
         if self.file is None:
@@ -663,12 +821,10 @@ class FeedSlot:
                 if not isinstance(plugins, list):
                     raise TypeError("feed postprocessing must be a list")
                 self.file = PostProcessingManager(plugins, self.file, self.feed_options)
-            exporter_type = self.exporters[self.format]
             options = self.feed_options
-            self.exporter = _build_from_crawler(
-                exporter_type,
-                self.crawler,
+            self.exporter = self._get_exporter(
                 self.file,
+                self.format,
                 fields_to_export=options["fields"],
                 encoding=options["encoding"],
                 indent=options["indent"],
@@ -677,6 +833,21 @@ class FeedSlot:
         if not self.exporting:
             self.exporter.start_exporting()
             self.exporting = True
+
+    def _get_exporter(
+        self,
+        file: BinaryIO,
+        format_: str,
+        *args: object,
+        **kwargs: object,
+    ) -> BaseItemExporter:
+        return _build_from_crawler(
+            self.exporters[format_],
+            self.crawler,
+            file,
+            *args,
+            **kwargs,
+        )
 
     def finish_exporting(self) -> None:
         if self.exporting and self.exporter is not None:
@@ -876,8 +1047,9 @@ class FeedExporter:
             filter=self.filters[uri_template],
             feed_options=options,
             spider=spider,
-            crawler=self.crawler,
             exporters=self.exporters,
+            settings=self.settings,
+            crawler=self.crawler,
         )
 
     def open_spider(self, spider: object) -> None:

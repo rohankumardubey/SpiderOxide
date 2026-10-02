@@ -161,6 +161,7 @@ DEFAULT_SETTINGS: dict[str, object] = {
         "": "spideroxide.feedexport.FileFeedStorage",
         "file": "spideroxide.feedexport.FileFeedStorage",
         "ftp": "spideroxide.feedexport.FTPFeedStorage",
+        "ftps": "spideroxide.feedexport.FTPFeedStorage",
         "gs": "spideroxide.feedexport.GCSFeedStorage",
         "s3": "spideroxide.feedexport.S3FeedStorage",
         "stdout": "spideroxide.feedexport.StdoutFeedStorage",
@@ -176,8 +177,10 @@ DEFAULT_SETTINGS: dict[str, object] = {
     "AWS_SESSION_TOKEN": None,
     "AWS_ENDPOINT_URL": None,
     "AWS_REGION_NAME": None,
+    "AWS_MAX_POOL_CONNECTIONS": None,
     "AWS_USE_SSL": None,
     "AWS_VERIFY": None,
+    "REACTOR_THREADPOOL_MAXSIZE": 10,
     "GCS_PROJECT_ID": None,
     "FEED_EXPORTERS_BASE": {
         "json": "spideroxide.feedexport.JsonItemExporter",
@@ -186,6 +189,8 @@ DEFAULT_SETTINGS: dict[str, object] = {
         "jl": "spideroxide.feedexport.JsonLinesItemExporter",
         "csv": "spideroxide.feedexport.CsvItemExporter",
         "xml": "spideroxide.feedexport.XmlItemExporter",
+        "marshal": "spideroxide.feedexport.MarshalItemExporter",
+        "pickle": "spideroxide.feedexport.PickleItemExporter",
     },
     "FEED_EXPORTERS": {},
     "FEED_EXPORT_ENCODING": None,
@@ -383,10 +388,12 @@ class BaseSettings(MutableMapping[str, object]):
             ) from None
 
     def getint(self, name: str, default: int = 0) -> int:
-        return int(self.get(name, default))
+        value = self.get(name, default)
+        return default if value is None else int(value)
 
     def getfloat(self, name: str, default: float = 0.0) -> float:
-        return float(self.get(name, default))
+        value = self.get(name, default)
+        return default if value is None else float(value)
 
     def getpriority(self, name: str) -> int | None:
         setting = self.attributes.get(name)

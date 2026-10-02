@@ -35,8 +35,14 @@ from spideroxide import (
     S3FeedStorage,
     Settings,
     Spider,
+    StdoutFeedStorage,
 )
-from spideroxide.feedexport import _format_uri_template, _ftp_makedirs_cwd, _ftp_store_file
+from spideroxide.feedexport import (
+    _format_uri_template,
+    _ftp_makedirs_cwd,
+    _ftp_store_file,
+    apply_uri_params,
+)
 
 
 class FeedDownloader:
@@ -391,6 +397,13 @@ def _verify_uri_formatting() -> None:
     assert _format_uri_template("s3://bucket/%(batch_id)+#08x.jl", {"batch_id": 15}) == (
         "s3://bucket/+0x0000f.jl"
     )
+    assert (
+        apply_uri_params(
+            "file:///tmp/100%%-%(batch_id)03d-%23.jl",
+            {"batch_id": 3},
+        )
+        == "file:///tmp/100%%-003-%23.jl"
+    )
 
 
 def _verify_temporary_directory() -> None:
@@ -412,6 +425,17 @@ def _verify_temporary_directory() -> None:
             assert str(error) == f"Not a Directory: {invalid}"
         else:
             raise AssertionError("BlockingFeedStorage accepted a missing FEED_TEMPDIR")
+
+
+def _verify_stdout_storage() -> None:
+    output = BytesIO()
+    storage = StdoutFeedStorage("stdout:", _stdout=output)
+    file = storage.open(SimpleNamespace())
+    assert file is output
+    file.write(b"stdout feed")
+    assert storage.store(file) is None
+    assert output.getvalue() == b"stdout feed"
+    assert not output.closed
 
 
 def _verify_scrapy_postprocessing() -> None:
@@ -481,16 +505,27 @@ class FakeBotoSession:
         return self.client_instance
 
 
+class FakeBotoConfig:
+    def __init__(self, *, max_pool_connections: int) -> None:
+        self.max_pool_connections = max_pool_connections
+
+
 def _verify_s3_configuration() -> None:
     boto3 = types.ModuleType("boto3")
     session_module = types.ModuleType("boto3.session")
     session_module.Session = FakeBotoSession
     boto3.session = session_module
+    botocore = types.ModuleType("botocore")
+    config_module = types.ModuleType("botocore.config")
+    config_module.Config = FakeBotoConfig
+    botocore.config = config_module
     with patch.dict(
         sys.modules,
         {
             "boto3": boto3,
             "boto3.session": session_module,
+            "botocore": botocore,
+            "botocore.config": config_module,
         },
     ):
         storage = S3FeedStorage(
@@ -501,18 +536,30 @@ def _verify_s3_configuration() -> None:
             endpoint_url="https://s3.example.test",
             region_name="test-1",
             acl="private",
+            max_pool_connections=30,
         )
+        direct_client_kwargs = dict(FakeBotoSession.client_kwargs)
+        crawler_storage = S3FeedStorage.from_crawler(
+            SimpleNamespace(settings=Settings({"AWS_MAX_POOL_CONNECTIONS": 40})),
+            "s3://bucket/feeds/items.jl",
+        )
+        crawler_client_kwargs = dict(FakeBotoSession.client_kwargs)
     assert storage.bucketname == "bucket"
     assert storage.keyname == "feeds/items.jl"
     assert storage.access_key == "uri-access"
     assert storage.secret_key == "uri-secret"
-    assert FakeBotoSession.client_kwargs == {
+    assert direct_client_kwargs == {
         "aws_access_key_id": "uri-access",
         "aws_secret_access_key": "uri-secret",
         "aws_session_token": "token",
         "endpoint_url": "https://s3.example.test",
         "region_name": "test-1",
+        "config": direct_client_kwargs["config"],
     }
+    assert storage.max_pool_connections == 30
+    assert direct_client_kwargs["config"].max_pool_connections == 30
+    assert crawler_storage.max_pool_connections == 40
+    assert crawler_client_kwargs["config"].max_pool_connections == 40
 
 
 def _verify_s3_upload() -> None:
@@ -666,6 +713,7 @@ def _verify_ftp_upload() -> None:
             password=storage.password,
             use_active_mode=storage.use_active_mode,
             overwrite=storage.overwrite,
+            tls=storage.tls,
         )
     assert file.closed
     assert FakeFTP.instance.calls == [
@@ -679,6 +727,43 @@ def _verify_ftp_upload() -> None:
     _ftp_makedirs_cwd(racing, "/feeds")
     assert racing.cwd_calls == ["/feeds", "/", "/feeds"]
 
+    secure = FTPFeedStorage("ftps://user:p%40ss@example.test/feeds/items.jl")
+    assert secure.tls is True
+    secure_file = BytesIO(b"ftps feed")
+
+    class FakeTLS(FakeFTP):
+        def __init__(self, *, context: object) -> None:
+            super().__init__()
+            self.calls.append(("context", context))
+
+        def prot_p(self) -> None:
+            self.calls.append(("prot_p",))
+
+    with (
+        patch("spideroxide.feedexport.FTP_TLS", FakeTLS),
+        patch("spideroxide.feedexport.create_default_context", return_value="tls-context"),
+    ):
+        _ftp_store_file(
+            path=secure.path,
+            file=secure_file,
+            host=secure.host,
+            port=secure.port,
+            username=secure.username,
+            password=secure.password,
+            use_active_mode=secure.use_active_mode,
+            overwrite=secure.overwrite,
+            tls=secure.tls,
+        )
+    assert secure_file.closed
+    assert FakeTLS.instance.calls == [
+        ("context", "tls-context"),
+        ("connect", "example.test", 21),
+        ("login", "user", "p@ss"),
+        ("prot_p",),
+        ("cwd", "/feeds"),
+        ("storbinary", "STOR items.jl", b"ftps feed"),
+    ]
+
 
 async def main() -> None:
     _verify_manager_file_api()
@@ -686,6 +771,7 @@ async def main() -> None:
     _verify_plugin_stacks()
     _verify_uri_formatting()
     _verify_temporary_directory()
+    _verify_stdout_storage()
     _verify_scrapy_postprocessing()
     _verify_s3_configuration()
     _verify_s3_upload()

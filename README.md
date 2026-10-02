@@ -69,8 +69,8 @@ Scrapy.
 * Scheme-aware download handlers for HTTP, HTTPS, data URIs, local files, FTP, and S3
 * Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
 * Priority-ordered Scrapy-compatible extensions, lifecycle signals, and operational monitoring
-* Streaming Scrapy-compatible JSON, JSON Lines, CSV, and XML feed exports
-* FTP, S3, and GCS feed storage with gzip, bzip2, and LZMA postprocessing
+* Streaming Scrapy-compatible JSON, JSON Lines, CSV, XML, Marshal, and Pickle feed exports
+* Filesystem, stdout, FTP, FTPS, S3, and GCS feed storage with gzip, bzip2, and LZMA postprocessing
 * Safe Rust with no unsafe blocks
 
 ## Quick start
@@ -859,13 +859,17 @@ crawl should replace the previous output. Export completion is observable throug
 
 Remote feeds use temporary local files and upload them outside the event loop. Configure the
 temporary directory with `FEED_TEMPDIR` and bound simultaneous uploads with
-`FEED_STORAGE_CONCURRENCY`, which defaults to four. FTP credentials may be embedded in the URI, and
-`FEED_STORAGE_FTP_ACTIVE` selects active mode. S3 uses the standard AWS credential chain or the
+`FEED_STORAGE_CONCURRENCY`, which defaults to four. FTP and FTPS credentials may be embedded in the
+URI, `FEED_STORAGE_FTP_ACTIVE` selects active mode, and FTPS verifies the server certificate and
+protects the data channel. S3 uses the standard AWS credential chain or the
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ENDPOINT_URL`, and
-`AWS_REGION_NAME` settings. GCS uses application default credentials and `GCS_PROJECT_ID`. Optional
-object ACLs come from `FEED_STORAGE_S3_ACL` and `FEED_STORAGE_GCS_ACL`.
+`AWS_REGION_NAME` settings. Set `AWS_MAX_POOL_CONNECTIONS` to override the S3 connection-pool size;
+otherwise it follows `REACTOR_THREADPOOL_MAXSIZE`. GCS uses application default credentials and
+`GCS_PROJECT_ID`. Optional object ACLs come from `FEED_STORAGE_S3_ACL` and
+`FEED_STORAGE_GCS_ACL`.
 
-Install S3 support with `pip install "spideroxide[s3]"`, GCS support with
+Use `stdout:` as a feed URI to write directly to standard output without closing it. Install S3
+support with `pip install "spideroxide[s3]"`, GCS support with
 `pip install "spideroxide[gcs]"`, or both with `pip install "spideroxide[remote-feeds]"`. FTP and
 the built-in postprocessors require no additional dependencies. Add `GzipPlugin`, `Bz2Plugin`, or
 `LZMAPlugin` to a feed's `postprocessing` list and pass the matching `gzip_*`, `bz2_*`, or `lzma_*`
@@ -1196,9 +1200,10 @@ The validation suite compares:
 * explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
 * extension priorities, overrides, factories, opt-outs, async hooks, lifecycle order, and parity
 * scheduler, downloader, streaming, robots, idle, item-error, and partial-download signals
-* feed formats, fields, encodings, templates, batches, filters, storage, signals, and engine parity
+* JSON, JSON Lines, CSV, XML, Marshal, Pickle, and Python-derived exporter behavior
+* feed fields, encodings, templates, batches, filters, storage, signals, and engine parity
 * local media storage, freshness, checksums, failures, image conversion, thumbnails, and parity
-* FTP, S3, and GCS feed storage plus gzip, bzip2, and LZMA postprocessing
+* stdout, FTP, FTPS, S3, and GCS feed storage plus gzip, bzip2, and LZMA postprocessing
 * handler overrides, disabling, lifecycle, data URIs, local files, FTP, S3, and engine parity
 
 It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
