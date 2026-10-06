@@ -125,13 +125,9 @@
         "tests/test_extension_periodic_log.py",
         "tests/test_http_cookies.py",
         "tests/test_logstats.py",
-        "tests/test_pqueues.py",
         "tests/test_responsetypes.py",
         "tests/test_robotstxt_interface.py",
-        "tests/test_scheduler*.py",
-        "tests/test_spiderstate.py",
         "tests/test_spidermiddleware*.py",
-        "tests/test_squeues*.py",
         "tests/test_stats.py",
         "tests/test_utils_datatypes.py"
       ],
@@ -178,6 +174,18 @@
         "tests/test_commands.py"
       ],
       "rationale": "Command metadata is compared directly with Scrapy 2.19, while subprocess integration covers dispatch, generated projects, crawls, feed output, and inspection commands."
+    },
+    {
+      "id": "persistence-project-interoperability",
+      "title": "Persistence and project interoperability",
+      "status": "adapted",
+      "upstream_tests": [
+        "tests/test_pqueues.py",
+        "tests/test_scheduler*.py",
+        "tests/test_spiderstate.py",
+        "tests/test_squeues*.py"
+      ],
+      "rationale": "Public request reconstruction and queue settings are compared directly; fixture-driven integration tests import Scrapy 2.19 Pickle and Marshal FIFO/LIFO JOBDIR layouts into the native crash-safe store without modifying source state."
     },
     {
       "id": "addons-services",

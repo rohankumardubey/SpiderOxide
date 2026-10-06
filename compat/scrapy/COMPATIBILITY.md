@@ -28,6 +28,26 @@ reports in CI.
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
   project settings loading, object loading, and common encoding and URL helpers
+- One-time import of standard Scrapy 2.19 `JOBDIR` layouts into SpiderOxide's native persistence
+  format, including queued requests, duplicate fingerprints, callbacks, priorities, and spider state
+
+## Persistence and project formats
+
+SpiderOxide reads and writes its versioned SQLite `JOBDIR` format. Native schemas 1 and 2 migrate to
+schema 3. When a job directory contains only Scrapy 2.19 state, SpiderOxide can atomically import the
+standard `ScrapyPriorityQueue` layout using Pickle or Marshal FIFO/LIFO disk queues, the default
+20-byte request fingerprints, protocol-4 spider state, and built-in request classes. The original
+Scrapy files remain byte-for-byte unchanged and become a downgrade snapshot; SpiderOxide does not
+export subsequent native progress back into them.
+
+Custom priority queues, custom request classes, nonstandard fingerprints, corrupt files, and
+directories containing both unmarked native and Scrapy state are rejected without replacing or
+deleting source data. Pickle-based job directories are trusted-code inputs and must not be imported
+from untrusted sources.
+
+Scrapy project settings modules, generated project and spider layouts, feed configuration, command
+discovery, and `scrapy.cfg` project-root discovery are supported directly. They do not require a
+format migration.
 
 ## Public roadmap gaps
 

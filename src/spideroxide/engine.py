@@ -19,6 +19,7 @@ from .job import (
     serialize_request,
     serialize_spider_state,
 )
+from .jobinterop import migrate_scrapy_jobdir
 from .middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
@@ -610,6 +611,9 @@ class NativeCrawlEngine(CrawlEngine):
             else None
         )
         queue_config = SchedulerQueueConfig.from_settings(settings)
+        migration = (
+            migrate_scrapy_jobdir(job_dir, spider, settings) if job_dir is not None else None
+        )
         coordinator = NativeCrawlCoordinator(
             concurrency,
             pending_limit,
@@ -630,6 +634,15 @@ class NativeCrawlEngine(CrawlEngine):
             self._job_dir = job_dir
             self._log_unserializable = settings.getbool("SCHEDULER_DEBUG")
             self._unserializable_logged = False
+            if migration is not None:
+                self.stats.set_value("jobdir/migrated/requests", migration.requests)
+                self.stats.set_value("jobdir/migrated/fingerprints", migration.fingerprints)
+                self.stats.set_value("jobdir/migrated/spider_state", migration.spider_state)
+                spider.logger.info(
+                    "Imported Scrapy JOBDIR (%d requests, %d fingerprints)",
+                    migration.requests,
+                    migration.fingerprints,
+                )
             recovered = coordinator.take_recovered()
             for request_id, payload in recovered:
                 request = deserialize_request(payload, spider)

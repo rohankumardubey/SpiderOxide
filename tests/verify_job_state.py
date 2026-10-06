@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import marshal
 import os
+import pickle
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -27,6 +31,8 @@ from spideroxide import (
     Spider,
 )
 from spideroxide.job import deserialize_request, serialize_request
+from spideroxide.jobinterop import migrate_scrapy_jobdir
+from spideroxide.settings import Settings
 
 
 class BlockingDownloader:
@@ -147,6 +153,108 @@ class CloseOnceSpider(Spider):
             self.state["stopped"] = True
             raise CloseSpider("paused")
         return {"resumed": True}
+
+
+class ScrapyImportedSpider(Spider):
+    name = "scrapy-imported"
+
+    async def start(self):
+        if not self.state.get("seeded"):
+            raise AssertionError("Scrapy spider state was not imported")
+        if False:
+            yield
+
+    def parse_page(self, response: Response, label: str) -> dict[str, str]:
+        assert response.request is not None
+        assert response.request.headers.getlist("X-Source") == [b"scrapy", label.encode()]
+        self.state["processed"] = self.state.get("processed", 0) + 1
+        return {"label": label}
+
+
+def _scrapy_request(
+    label: str,
+    priority: int,
+    *,
+    start: bool = False,
+    request_class: str | None = None,
+) -> dict[str, object]:
+    values: dict[str, object] = {
+        "url": f"https://example.test/scrapy/{label}",
+        "callback": "parse_page",
+        "errback": None,
+        "method": "POST",
+        "headers": {b"X-Source": [b"scrapy", label.encode()]},
+        "body": label.encode(),
+        "cookies": {"session": label},
+        "meta": {"is_start_request": start, "source": "scrapy"},
+        "encoding": "utf-8",
+        "priority": priority,
+        "dont_filter": False,
+        "flags": ["persisted"],
+        "cb_kwargs": {"label": label},
+    }
+    if request_class is not None:
+        values["_class"] = request_class
+    if request_class == "scrapy.http.request.json_request.JsonRequest":
+        values["dumps_kwargs"] = {"sort_keys": False}
+    return values
+
+
+def _serialize_scrapy_queue_item(values: object, serialization: str) -> bytes:
+    if serialization == "pickle":
+        return pickle.dumps(values, protocol=4)
+    return marshal.dumps(values)
+
+
+def _write_lifo_queue(path: Path, items: list[bytes]) -> None:
+    payload = bytearray(struct.pack(">L", len(items)))
+    for item in items:
+        payload.extend(item)
+        payload.extend(struct.pack(">L", len(item)))
+    path.write_bytes(payload)
+
+
+def _write_fifo_queue(path: Path, items: list[bytes]) -> None:
+    path.mkdir()
+    chunk = bytearray()
+    for item in items:
+        chunk.extend(struct.pack(">L", len(item)))
+        chunk.extend(item)
+    (path / "q00000").write_bytes(chunk)
+    (path / "info.json").write_text(
+        json.dumps(
+            {
+                "chunksize": 100000,
+                "size": len(items),
+                "tail": [0, 0, 0],
+                "head": [0, len(items)],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_scrapy_queue(
+    path: Path,
+    values: list[dict[str, object]],
+    *,
+    serialization: str,
+    order: str,
+) -> None:
+    items = [_serialize_scrapy_queue_item(value, serialization) for value in values]
+    if order == "fifo":
+        _write_fifo_queue(path, items)
+    else:
+        _write_lifo_queue(path, items)
+
+
+def _scrapy_settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
+        "SCHEDULER_DISK_QUEUE": "scrapy.squeues.PickleLifoDiskQueue",
+        "SCHEDULER_START_DISK_QUEUE": "scrapy.squeues.PickleFifoDiskQueue",
+    }
+    values.update(overrides)
+    return Settings(values)
 
 
 async def _wait_for_stat(crawler: Crawler, name: str, value: int) -> None:
@@ -570,6 +678,225 @@ def _verify_fingerprint_schema_migration(directory: Path) -> None:
     assert fingerprints == (0,)
 
 
+def _create_scrapy_jobdir(directory: Path) -> tuple[bytes, bytes]:
+    queue = directory / "requests.queue"
+    queue.mkdir(parents=True)
+    (queue / "active.json").write_text(json.dumps([-10, -1]), encoding="utf-8")
+    _write_scrapy_queue(
+        queue / "-10",
+        [
+            _scrapy_request(
+                "normal-form",
+                10,
+                request_class="scrapy.http.request.form.FormRequest",
+            ),
+            _scrapy_request(
+                "normal-json",
+                10,
+                request_class="scrapy.http.request.json_request.JsonRequest",
+            ),
+        ],
+        serialization="pickle",
+        order="lifo",
+    )
+    _write_scrapy_queue(
+        queue / "-10s",
+        [
+            _scrapy_request("start-first", 10, start=True),
+            _scrapy_request("start-second", 10, start=True),
+        ],
+        serialization="pickle",
+        order="fifo",
+    )
+    _write_scrapy_queue(
+        queue / "-1",
+        [_scrapy_request("low", 1)],
+        serialization="pickle",
+        order="lifo",
+    )
+    first_fingerprint = b"a" * 20
+    second_fingerprint = b"b" * 20
+    (directory / "requests.seen").write_bytes(
+        b"".join(
+            len(fingerprint).to_bytes(2, "big") + fingerprint
+            for fingerprint in (first_fingerprint, second_fingerprint)
+        )
+    )
+    (directory / "spider.state").write_bytes(
+        pickle.dumps({"seeded": True, "source": "scrapy"}, protocol=4)
+    )
+    return first_fingerprint, second_fingerprint
+
+
+async def _verify_scrapy_jobdir_resume(directory: Path) -> None:
+    fingerprints = _create_scrapy_jobdir(directory)
+    source_files = {
+        path.relative_to(directory): path.read_bytes()
+        for path in directory.rglob("*")
+        if path.is_file()
+    }
+    downloader = RecordingDownloader()
+    crawler = Crawler(
+        ScrapyImportedSpider,
+        {
+            "CONCURRENT_REQUESTS": 1,
+            "ENGINE_BACKEND": "rust",
+            "JOBDIR": directory,
+        },
+        downloader=downloader,
+    )
+    result = await crawler.crawl()
+    labels = [request.cb_kwargs["label"] for request in downloader.requests]
+    assert labels == [
+        "normal-json",
+        "normal-form",
+        "start-first",
+        "start-second",
+        "low",
+    ]
+    assert type(downloader.requests[0]) is JsonRequest
+    assert downloader.requests[0].dumps_kwargs == {"sort_keys": False}
+    assert type(downloader.requests[1]) is FormRequest
+    assert result.items == tuple({"label": label} for label in labels)
+    assert result.stats["scheduler/recovered"] == 5
+    assert result.stats["jobdir/migrated/requests"] == 5
+    assert result.stats["jobdir/migrated/fingerprints"] == 2
+    assert result.stats["jobdir/migrated/spider_state"] is True
+    assert crawler.spider is not None
+    assert crawler.spider.state == {"seeded": True, "source": "scrapy", "processed": 5}
+
+    for relative, contents in source_files.items():
+        assert (directory / relative).read_bytes() == contents
+    with sqlite3.connect(directory / "job.sqlite3") as connection:
+        marker = connection.execute(
+            "SELECT value FROM metadata WHERE key = 'scrapy_migration_version'"
+        ).fetchone()
+        imported_fingerprints = {
+            row[0]
+            for row in connection.execute(
+                "SELECT fingerprint FROM fingerprints WHERE fingerprint IN (?, ?)",
+                fingerprints,
+            )
+        }
+    assert marker == (1,)
+    assert imported_fingerprints == set(fingerprints)
+
+    second = migrate_scrapy_jobdir(
+        directory,
+        ScrapyImportedSpider(),
+        _scrapy_settings(),
+    )
+    assert second is None
+
+
+def _verify_scrapy_queue_formats(root: Path) -> None:
+    formats = (
+        ("scrapy.squeues.PickleFifoDiskQueue", "pickle", "fifo"),
+        ("scrapy.squeues.PickleLifoDiskQueue", "pickle", "lifo"),
+        ("scrapy.squeues.MarshalFifoDiskQueue", "marshal", "fifo"),
+        ("scrapy.squeues.MarshalLifoDiskQueue", "marshal", "lifo"),
+    )
+    for index, (queue_class, serialization, order) in enumerate(formats):
+        directory = root / str(index)
+        queue = directory / "requests.queue"
+        queue.mkdir(parents=True)
+        interrupted = directory / ".spideroxide-migration-interrupted.sqlite3"
+        interrupted.write_bytes(b"partial")
+        (queue / "active.json").write_text("[0]", encoding="utf-8")
+        _write_scrapy_queue(
+            queue / "0",
+            [_scrapy_request(f"{serialization}-{order}", 0)],
+            serialization=serialization,
+            order=order,
+        )
+        migration = migrate_scrapy_jobdir(
+            directory,
+            ScrapyImportedSpider(),
+            _scrapy_settings(
+                SCHEDULER_DISK_QUEUE=queue_class,
+                SCHEDULER_START_DISK_QUEUE=None,
+            ),
+        )
+        assert migration is not None
+        assert migration.requests == 1
+        assert interrupted.read_bytes() == b"partial"
+        with sqlite3.connect(directory / "job.sqlite3") as connection:
+            payload = connection.execute("SELECT payload FROM requests").fetchone()
+        assert payload is not None
+        request = deserialize_request(payload[0], ScrapyImportedSpider())
+        assert request.url.endswith(f"/{serialization}-{order}")
+
+
+def _verify_scrapy_jobdir_rejections(root: Path) -> None:
+    corrupt = root / "corrupt"
+    queue = corrupt / "requests.queue"
+    queue.mkdir(parents=True)
+    (queue / "active.json").write_text("[0]", encoding="utf-8")
+    (queue / "0").write_bytes(struct.pack(">L", 1))
+    before = (queue / "0").read_bytes()
+    try:
+        migrate_scrapy_jobdir(corrupt, ScrapyImportedSpider(), _scrapy_settings())
+    except ValueError as error:
+        assert "truncated LIFO entry" in str(error)
+    else:
+        raise AssertionError("corrupt Scrapy queue was imported")
+    assert not (corrupt / "job.sqlite3").exists()
+    assert (queue / "0").read_bytes() == before
+
+    unsupported = root / "unsupported"
+    queue = unsupported / "requests.queue"
+    queue.mkdir(parents=True)
+    (queue / "active.json").write_text("[0]", encoding="utf-8")
+    _write_scrapy_queue(
+        queue / "0",
+        [_scrapy_request("unsupported", 0)],
+        serialization="pickle",
+        order="lifo",
+    )
+    try:
+        migrate_scrapy_jobdir(
+            unsupported,
+            ScrapyImportedSpider(),
+            _scrapy_settings(SCHEDULER_DISK_QUEUE="project.CustomQueue"),
+        )
+    except ValueError as error:
+        assert "unsupported SCHEDULER_DISK_QUEUE" in str(error)
+    else:
+        raise AssertionError("custom Scrapy queue was imported")
+    assert not (unsupported / "job.sqlite3").exists()
+
+    custom_request = root / "custom-request"
+    queue = custom_request / "requests.queue"
+    queue.mkdir(parents=True)
+    (queue / "active.json").write_text("[0]", encoding="utf-8")
+    request = _scrapy_request("custom", 0)
+    request["_class"] = "project.requests.CustomRequest"
+    _write_scrapy_queue(
+        queue / "0",
+        [request],
+        serialization="pickle",
+        order="lifo",
+    )
+    try:
+        migrate_scrapy_jobdir(custom_request, ScrapyImportedSpider(), _scrapy_settings())
+    except ValueError as error:
+        assert "unsupported Scrapy persisted request class" in str(error)
+    else:
+        raise AssertionError("custom Scrapy request class was imported")
+    assert not (custom_request / "job.sqlite3").exists()
+
+    ambiguous = root / "ambiguous"
+    coordinator = NativeCrawlCoordinator(1, 1, str(ambiguous))
+    coordinator.close()
+    (ambiguous / "spider.state").write_bytes(pickle.dumps({"source": "scrapy"}, protocol=4))
+    try:
+        migrate_scrapy_jobdir(ambiguous, ScrapyImportedSpider(), _scrapy_settings())
+    except ValueError as error:
+        assert "coexist without a migration marker" in str(error)
+    else:
+        raise AssertionError("ambiguous native and Scrapy state was accepted")
+
+
 async def _verify() -> None:
     _verify_request_subclass_roundtrip()
     with tempfile.TemporaryDirectory(prefix="spideroxide-native-store-") as temporary:
@@ -592,6 +919,12 @@ async def _verify() -> None:
         _verify_schema_migration(Path(temporary) / "job")
     with tempfile.TemporaryDirectory(prefix="spideroxide-fingerprint-migration-") as temporary:
         _verify_fingerprint_schema_migration(Path(temporary) / "job")
+    with tempfile.TemporaryDirectory(prefix="spideroxide-scrapy-resume-") as temporary:
+        await _verify_scrapy_jobdir_resume(Path(temporary))
+    with tempfile.TemporaryDirectory(prefix="spideroxide-scrapy-formats-") as temporary:
+        _verify_scrapy_queue_formats(Path(temporary))
+    with tempfile.TemporaryDirectory(prefix="spideroxide-scrapy-rejections-") as temporary:
+        _verify_scrapy_jobdir_rejections(Path(temporary))
 
 
 if __name__ == "__main__":
@@ -602,5 +935,6 @@ if __name__ == "__main__":
         print(
             "Persistent job state passed: Rust WAL storage, locking, recovery, priority, "
             "fingerprints, callbacks, request data, spider state, cancellation, graceful stops, "
-            "hard crashes, memory fallback, schema checks, and auto-engine selection"
+            "hard crashes, memory fallback, schema checks, Scrapy JOBDIR migration, and "
+            "auto-engine selection"
         )
