@@ -182,14 +182,30 @@ def _body_length(headers: Headers) -> int | None:
         return None
 
 
-def _proxy_details(request: Request) -> tuple[str | None, bytes | None]:
+def _proxy_details(
+    request: Request,
+) -> tuple[str | None, bytes | None, tuple[str, str] | None]:
     proxy = request.meta.get("proxy")
     if proxy is None:
-        return None, None
+        return None, None, None
     if not isinstance(proxy, str):
         raise DownloadError("request.meta['proxy'] must be a string or None")
+    proxy_scheme = urlsplit(proxy).scheme.lower()
+    if proxy_scheme not in {"http", "https", "socks4", "socks4a", "socks5", "socks5h"}:
+        raise DownloadError("request.meta['proxy'] contains an unsupported proxy scheme")
     authorization = request.headers.get("Proxy-Authorization")
-    return proxy, authorization
+    proxy_auth = request.meta.get("_proxy_auth")
+    if proxy_auth is not None and (
+        not isinstance(proxy_auth, tuple)
+        or len(proxy_auth) != 2
+        or not all(isinstance(value, str) for value in proxy_auth)
+    ):
+        raise DownloadError("request.meta['_proxy_auth'] must contain proxy credentials")
+    if proxy_scheme.startswith("socks"):
+        authorization = None
+    else:
+        proxy_auth = None
+    return proxy, authorization, proxy_auth
 
 
 def _transport_headers(
@@ -253,30 +269,55 @@ class HttpxDownloader:
         self._standalone = crawler is None
         self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
         self.client = self._create_client()
-        self._proxy_clients: dict[tuple[str, bytes | None], httpx.AsyncClient] = {}
+        self._proxy_clients: dict[
+            tuple[str, bytes | None, tuple[str, str] | None],
+            httpx.AsyncClient,
+        ] = {}
 
     def _create_client(
         self,
         proxy: str | None = None,
         authorization: bytes | None = None,
+        proxy_auth: tuple[str, str] | None = None,
     ) -> httpx.AsyncClient:
-        proxy_config = (
-            None
-            if proxy is None
-            else httpx.Proxy(
+        transport = self._transport
+        proxy_config = None
+        if proxy is not None and urlsplit(proxy).scheme.startswith("socks"):
+            if self._transport is not None:
+                raise ValueError("custom HTTPX transports cannot be combined with SOCKS proxies")
+            try:
+                from httpx_socks import AsyncProxyTransport, ProxyType
+            except ImportError as error:
+                raise ValueError("SOCKS proxy support requires the httpx-socks package") from error
+            username, password = proxy_auth or (None, None)
+            parsed_proxy = urlsplit(proxy)
+            transport = AsyncProxyTransport(
+                proxy_type=(
+                    ProxyType.SOCKS4
+                    if parsed_proxy.scheme in {"socks4", "socks4a"}
+                    else ProxyType.SOCKS5
+                ),
+                proxy_host=parsed_proxy.hostname or "",
+                proxy_port=parsed_proxy.port or 1080,
+                username=username,
+                password=password,
+                rdns=parsed_proxy.scheme in {"socks4a", "socks5h"},
+                trust_env=False,
+            )
+        elif proxy is not None:
+            proxy_config = httpx.Proxy(
                 proxy,
                 headers=(
                     None if authorization is None else [(b"Proxy-Authorization", authorization)]
                 ),
             )
-        )
         client = httpx.AsyncClient(
             timeout=self._timeout,
             follow_redirects=False,
             headers={"User-Agent": self._user_agent}
             if self._standalone and self._user_agent
             else None,
-            transport=self._transport,
+            transport=transport,
             proxy=proxy_config,
             trust_env=False,
         )
@@ -289,15 +330,15 @@ class HttpxDownloader:
     async def fetch(self, request: Request) -> Response:
         timeout = _request_timeout(request, self._timeout)
         max_size = _request_max_size(request, self.max_size)
-        proxy, authorization = _proxy_details(request)
+        proxy, authorization, proxy_auth = _proxy_details(request)
         if proxy is None:
             client = self.client
         else:
-            key = (proxy, authorization)
+            key = (proxy, authorization, proxy_auth)
             client = self._proxy_clients.get(key)
             if client is None:
                 try:
-                    client = self._create_client(proxy, authorization)
+                    client = self._create_client(proxy, authorization, proxy_auth)
                 except (TypeError, ValueError) as error:
                     raise DownloadError(f"invalid proxy URL: {error}") from error
                 self._proxy_clients[key] = client
@@ -427,7 +468,7 @@ class RustDownloader:
             request,
             self.settings.getint("DOWNLOAD_MAXSIZE", 0),
         )
-        proxy, authorization = _proxy_details(request)
+        proxy, authorization, proxy_auth = _proxy_details(request)
         stopped: list[StopDownload] = []
         loop = asyncio.get_running_loop()
         loop_thread_id = threading.get_ident()
@@ -490,7 +531,7 @@ class RustDownloader:
                 request.method,
                 _request_headers(request, cookies_enabled=self._cookies_enabled),
                 request.body,
-                None if proxy is None else (proxy, authorization),
+                None if proxy is None else (proxy, authorization, proxy_auth),
                 native_headers_callback,
                 native_bytes_callback,
                 timeout,
