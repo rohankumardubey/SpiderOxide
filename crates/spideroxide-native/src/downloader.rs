@@ -19,6 +19,9 @@ use tokio_util::io::StreamReader;
 use crate::NativeDownloadError;
 
 type ResponseReader = Pin<Box<dyn AsyncRead + Send>>;
+type ProxyCredentials<'a> = (&'a str, &'a str);
+type ProxyConfig<'a> = (&'a str, Option<&'a [u8]>, Option<ProxyCredentials<'a>>);
+type OwnedProxyConfig = (String, Option<Vec<u8>>, Option<(String, String)>);
 
 fn download_error(message: impl Into<String>) -> PyErr {
     NativeDownloadError::new_err(message.into())
@@ -126,11 +129,21 @@ fn client_builder(user_agent: Option<&str>, transport_defaults: bool) -> ClientB
 fn build_client(
     user_agent: Option<&str>,
     transport_defaults: bool,
-    proxy: Option<(&str, Option<&[u8]>)>,
+    proxy: Option<ProxyConfig<'_>>,
 ) -> PyResult<Client> {
     let mut builder = client_builder(user_agent, transport_defaults);
-    if let Some((url, authorization)) = proxy {
-        let mut configured = Proxy::all(url)
+    if let Some((url, authorization, credentials)) = proxy {
+        let mut proxy_url = reqwest::Url::parse(url)
+            .map_err(|error| download_error(format!("invalid proxy URL: {error}")))?;
+        if let Some((username, password)) = credentials {
+            proxy_url
+                .set_username(username)
+                .map_err(|_| download_error("invalid SOCKS proxy username"))?;
+            proxy_url
+                .set_password(Some(password))
+                .map_err(|_| download_error("invalid SOCKS proxy password"))?;
+        }
+        let mut configured = Proxy::all(proxy_url)
             .map_err(|error| download_error(format!("invalid proxy URL: {error}")))?;
         if let Some(authorization) = authorization {
             let header = HeaderValue::from_bytes(authorization).map_err(|error| {
@@ -149,6 +162,7 @@ fn build_client(
 struct ProxyClientKey {
     url: String,
     authorization: Option<Vec<u8>>,
+    credentials: Option<(String, String)>,
 }
 
 #[pyclass(module = "spideroxide._native")]
@@ -224,6 +238,7 @@ impl NativeHttpClient {
         &self,
         proxy: Option<&str>,
         authorization: Option<&[u8]>,
+        credentials: Option<(&str, &str)>,
     ) -> PyResult<Client> {
         let Some(proxy) = proxy else {
             return Ok(self.client.clone());
@@ -231,6 +246,8 @@ impl NativeHttpClient {
         let key = ProxyClientKey {
             url: proxy.to_owned(),
             authorization: authorization.map(<[u8]>::to_vec),
+            credentials: credentials
+                .map(|(username, password)| (username.to_owned(), password.to_owned())),
         };
         let mut clients = self.lock_proxy_clients()?;
         if let Some(client) = clients.get(&key) {
@@ -239,7 +256,7 @@ impl NativeHttpClient {
         let client = build_client(
             self.user_agent.as_deref(),
             self.transport_defaults,
-            Some((proxy, authorization)),
+            Some((proxy, authorization, credentials)),
         )?;
         clients.insert(key, client.clone());
         Ok(client)
@@ -301,17 +318,21 @@ impl NativeHttpClient {
         method: String,
         headers: Vec<(String, Vec<u8>)>,
         body: Vec<u8>,
-        proxy: Option<(String, Option<Vec<u8>>)>,
+        proxy: Option<OwnedProxyConfig>,
         headers_callback: Option<Py<PyAny>>,
         bytes_callback: Option<Py<PyAny>>,
         request_timeout: Option<f64>,
         request_max_size: Option<usize>,
     ) -> PyResult<Bound<'py, PyAny>> {
         let client = self.client_for_proxy(
-            proxy.as_ref().map(|(url, _)| url.as_str()),
+            proxy.as_ref().map(|(url, _, _)| url.as_str()),
             proxy
                 .as_ref()
-                .and_then(|(_, authorization)| authorization.as_deref()),
+                .and_then(|(_, authorization, _)| authorization.as_deref()),
+            proxy
+                .as_ref()
+                .and_then(|(_, _, credentials)| credentials.as_ref())
+                .map(|(username, password)| (username.as_str(), password.as_str())),
         )?;
         let max_size = request_max_size.unwrap_or(self.max_size);
         let decode_response = self.transport_defaults;

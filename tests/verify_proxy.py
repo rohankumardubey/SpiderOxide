@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
+import struct
 import sys
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
@@ -25,6 +27,8 @@ from spideroxide import (
     Spider,
     TextResponse,
 )
+
+_ORIGIN_ATTEMPTS: dict[str, int] = {}
 
 
 async def _read_request(
@@ -120,6 +124,19 @@ class ProxyFixture:
 async def _serve_origin(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     try:
         method, target, headers, _ = await _read_request(reader)
+        if target == "/redirect":
+            await _send_response(
+                writer,
+                status="302 Found",
+                headers={"Location": f"http://{_header(headers, 'Host')}/final"},
+            )
+            return
+        if target == "/retry":
+            attempts = _ORIGIN_ATTEMPTS.get(target, 0) + 1
+            _ORIGIN_ATTEMPTS[target] = attempts
+            if attempts == 1:
+                await _send_response(writer, status="500 Internal Server Error")
+                return
         payload = json.dumps(
             {
                 "method": method,
@@ -139,6 +156,166 @@ async def _serve_origin(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
         writer.close()
         with suppress(ConnectionError):
             await writer.wait_closed()
+
+
+async def _serve_tls_sink(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    try:
+        await reader.read(4096)
+    finally:
+        writer.close()
+        with suppress(ConnectionError):
+            await writer.wait_closed()
+
+
+class SocksProxyFixture:
+    def __init__(
+        self,
+        *,
+        credentials: tuple[str, str] | None = None,
+        accept_any_credentials: bool = False,
+    ) -> None:
+        self.credentials = credentials
+        self.accept_any_credentials = accept_any_credentials
+        self.history: list[tuple[str, str, int, str | None]] = []
+
+    async def handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            version = (await reader.readexactly(1))[0]
+            if version == 4:
+                await self._handle_socks4(reader, writer)
+            elif version == 5:
+                await self._handle_socks5(reader, writer)
+            else:
+                raise ValueError(f"unsupported SOCKS version {version}")
+        except (ConnectionError, asyncio.IncompleteReadError):
+            writer.close()
+            with suppress(ConnectionError):
+                await writer.wait_closed()
+
+    async def _handle_socks4(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        command, port = struct.unpack("!BH", await reader.readexactly(3))
+        address = await reader.readexactly(4)
+        user_id = (await reader.readuntil(b"\0"))[:-1].decode()
+        if command != 1:
+            writer.write(b"\0\x5b\0\0\0\0\0\0")
+            await writer.drain()
+            return
+        if address[:3] == b"\0\0\0":
+            host = (await reader.readuntil(b"\0"))[:-1].decode("idna")
+            protocol = "socks4a"
+        else:
+            host = str(ipaddress.ip_address(address))
+            protocol = "socks4"
+        self.history.append((protocol, host, port, user_id or None))
+        await self._connect_and_relay(
+            reader,
+            writer,
+            host,
+            port,
+            b"\0\x5a" + struct.pack("!H", port) + address,
+            b"\0\x5b\0\0\0\0\0\0",
+        )
+
+    async def _handle_socks5(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        methods = await reader.readexactly((await reader.readexactly(1))[0])
+        username = None
+        require_auth = self.credentials is not None or self.accept_any_credentials
+        method = (
+            2 if require_auth and 2 in methods else 0 if not require_auth and 0 in methods else 255
+        )
+        writer.write(bytes((5, method)))
+        await writer.drain()
+        if method == 255:
+            writer.close()
+            return
+        if method == 2:
+            auth_version = (await reader.readexactly(1))[0]
+            username = (await reader.readexactly((await reader.readexactly(1))[0])).decode()
+            password = (await reader.readexactly((await reader.readexactly(1))[0])).decode()
+            valid = auth_version == 1 and (
+                self.accept_any_credentials or (username, password) == self.credentials
+            )
+            writer.write(bytes((1, 0 if valid else 1)))
+            await writer.drain()
+            if not valid:
+                writer.close()
+                return
+
+        version, command, reserved, address_type = await reader.readexactly(4)
+        if (version, command, reserved) != (5, 1, 0):
+            writer.write(b"\5\7\0\1\0\0\0\0\0\0")
+            await writer.drain()
+            return
+        if address_type == 1:
+            host = str(ipaddress.ip_address(await reader.readexactly(4)))
+        elif address_type == 3:
+            host = (await reader.readexactly((await reader.readexactly(1))[0])).decode("idna")
+        elif address_type == 4:
+            host = str(ipaddress.ip_address(await reader.readexactly(16)))
+        else:
+            writer.write(b"\5\10\0\1\0\0\0\0\0\0")
+            await writer.drain()
+            return
+        port = struct.unpack("!H", await reader.readexactly(2))[0]
+        self.history.append(("socks5", host, port, username))
+        await self._connect_and_relay(
+            reader,
+            writer,
+            host,
+            port,
+            b"\5\0\0\1\0\0\0\0\0\0",
+            b"\5\5\0\1\0\0\0\0\0\0",
+        )
+
+    async def _connect_and_relay(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        host: str,
+        port: int,
+        success: bytes,
+        failure: bytes,
+    ) -> None:
+        connect_host = "127.0.0.1" if host in {"target.test", "socks-target.invalid"} else host
+        try:
+            target_reader, target_writer = await asyncio.open_connection(connect_host, port)
+        except OSError:
+            writer.write(failure)
+            await writer.drain()
+            writer.close()
+            return
+        writer.write(success)
+        await writer.drain()
+
+        async def pipe(
+            source: asyncio.StreamReader,
+            destination: asyncio.StreamWriter,
+        ) -> None:
+            try:
+                while data := await source.read(65536):
+                    destination.write(data)
+                    await destination.drain()
+            except (ConnectionError, asyncio.IncompleteReadError):
+                pass
+            finally:
+                destination.close()
+
+        await asyncio.gather(
+            pipe(reader, target_writer),
+            pipe(target_reader, writer),
+        )
+        with suppress(ConnectionError):
+            await writer.wait_closed()
+        with suppress(ConnectionError):
+            await target_writer.wait_closed()
 
 
 class ProxySpider(Spider):
@@ -204,7 +381,24 @@ def _verify_middleware_api(proxy_url: str) -> None:
     middleware.process_request(request)
     assert "Proxy-Authorization" not in request.headers
 
-    for invalid in (42, "", "socks5://proxy.test:1080", "http:///missing"):
+    socks = Request(
+        "http://target.test/resource",
+        meta={"proxy": f"socks5h://user:p%40ss@{proxy_url}"},
+    )
+    middleware.process_request(socks)
+    assert socks.meta["proxy"] == f"socks5h://{proxy_url}"
+    assert socks.meta["_proxy_auth"] == ("user", "p@ss")
+    assert "Proxy-Authorization" not in socks.headers
+    assert "p@ss" not in socks.meta["proxy"]
+
+    for invalid in (
+        42,
+        "",
+        "ftp://proxy.test:21",
+        "http:///missing",
+        "socks4://user:password@proxy.test:1080",
+        "socks5://proxy.test:1080/path",
+    ):
         candidate = Request("http://target.test/", meta={"proxy": invalid})
         try:
             middleware.process_request(candidate)
@@ -366,6 +560,146 @@ async def _verify_environment_and_bypasses(
             assert excluded.items[0]["direct"] is True
 
 
+async def _verify_socks_protocols(
+    proxy_address: str,
+    fixture: SocksProxyFixture,
+    origin_port: int,
+    tls_port: int,
+) -> None:
+    middleware = HttpProxyMiddleware()
+    middleware.proxies = {}
+    cases = (
+        ("socks4", "127.0.0.1", "socks4", "127.0.0.1"),
+        ("socks4a", "socks-target.invalid", "socks4a", "socks-target.invalid"),
+        ("socks5", "127.0.0.1", "socks5", "127.0.0.1"),
+        ("socks5h", "socks-target.invalid", "socks5", "socks-target.invalid"),
+    )
+    for downloader_type in (HttpxDownloader, RustDownloader):
+        downloader = downloader_type()
+        for scheme, target_host, expected_protocol, expected_host in cases:
+            before = len(fixture.history)
+            request = Request(
+                f"http://{target_host}:{origin_port}/direct",
+                meta={"proxy": f"{scheme}://{proxy_address}"},
+            )
+            middleware.process_request(request)
+            response = await downloader.fetch(request)
+            assert isinstance(response, TextResponse)
+            assert response.json()["direct"] is True
+            assert response.json()["authorization"] is None
+            assert fixture.history[before][:3] == (
+                expected_protocol,
+                expected_host,
+                origin_port,
+            ), (downloader_type.__name__, scheme, fixture.history[before:])
+
+        before = len(fixture.history)
+        tls_request = Request(
+            f"https://socks-target.invalid:{tls_port}/",
+            meta={"proxy": f"socks5h://{proxy_address}"},
+        )
+        middleware.process_request(tls_request)
+        try:
+            await downloader.fetch(tls_request)
+        except Exception:
+            pass
+        else:
+            raise AssertionError("plain TCP fixture unexpectedly completed a TLS request")
+        assert fixture.history[before][:3] == (
+            "socks5",
+            "socks-target.invalid",
+            tls_port,
+        )
+
+        redirect = Request(
+            f"http://target.test:{origin_port}/redirect",
+            meta={"proxy": f"socks5h://{proxy_address}"},
+        )
+        middleware.process_request(redirect)
+        crawler = Crawler(
+            ProxySpider,
+            {"CONCURRENT_REQUESTS": 1},
+            downloader=downloader,
+        )
+        result = await crawler.crawl(url=redirect.url, meta=redirect.meta)
+        assert result.items[0]["target"] == "/final"
+        assert result.stats["redirect/count"] == 1
+
+        _ORIGIN_ATTEMPTS.clear()
+        before = len(fixture.history)
+        retry_crawler = Crawler(
+            ProxySpider,
+            {"CONCURRENT_REQUESTS": 1},
+            downloader=downloader_type(),
+        )
+        retry_result = await retry_crawler.crawl(
+            url=f"http://socks-target.invalid:{origin_port}/retry",
+            meta={"proxy": f"socks5h://{proxy_address}"},
+        )
+        assert retry_result.items[0]["target"] == "/retry"
+        assert retry_result.stats["retry/count"] == 1
+        assert len(fixture.history) == before + 2
+
+
+async def _verify_socks_authentication(
+    proxy_address: str,
+    fixture: SocksProxyFixture,
+    origin_port: int,
+) -> None:
+    middleware = HttpProxyMiddleware()
+    middleware.proxies = {}
+    secret = "socks-secret"
+    for downloader_type in (HttpxDownloader, RustDownloader):
+        downloader = downloader_type()
+        request = Request(
+            f"http://target.test:{origin_port}/direct",
+            meta={"proxy": f"socks5h://user:{secret}@{proxy_address}"},
+        )
+        middleware.process_request(request)
+        assert request.meta["proxy"] == f"socks5h://{proxy_address}"
+        assert secret not in request.meta["proxy"]
+        response = await downloader.fetch(request)
+        assert response.status == 200
+        assert fixture.history[-1][3] == "user"
+
+        failed = Request(
+            f"http://target.test:{origin_port}/direct",
+            meta={"proxy": f"socks5h://user:wrong-{secret}@{proxy_address}"},
+        )
+        middleware.process_request(failed)
+        try:
+            await downloader.fetch(failed)
+        except Exception as error:
+            assert secret not in str(error)
+        else:
+            raise AssertionError("SOCKS5 authentication failure unexpectedly succeeded")
+        if isinstance(downloader, HttpxDownloader):
+            assert len(downloader._proxy_clients) == 2
+        else:
+            assert downloader._client is not None
+            assert downloader._client.proxy_client_count == 2
+        await downloader.close()
+
+
+async def _verify_socks_environment(
+    proxy_address: str,
+    fixture: SocksProxyFixture,
+    origin_port: int,
+) -> None:
+    for downloader_type in (HttpxDownloader, RustDownloader):
+        with _proxy_environment(
+            all_proxy=f"socks5h://{proxy_address}",
+            no_proxy="",
+        ):
+            before = len(fixture.history)
+            _, result = await _crawl(
+                downloader_type,
+                url=f"http://target.test:{origin_port}/direct",
+            )
+            assert result.items[0]["direct"] is True
+            assert fixture.history[before][1] == "target.test"
+
+
 async def _verify() -> None:
     fixture = ProxyFixture()
     proxy_server = await asyncio.start_server(fixture.handle, "127.0.0.1", 0)
@@ -374,21 +708,41 @@ async def _verify() -> None:
     origin_server = await asyncio.start_server(_serve_origin, "127.0.0.1", 0)
     origin_port = origin_server.sockets[0].getsockname()[1]
     origin_url = f"http://127.0.0.1:{origin_port}/direct"
+    tls_server = await asyncio.start_server(_serve_tls_sink, "127.0.0.1", 0)
+    tls_port = tls_server.sockets[0].getsockname()[1]
+    socks_fixture = SocksProxyFixture()
+    socks_server = await asyncio.start_server(socks_fixture.handle, "127.0.0.1", 0)
+    socks_port = socks_server.sockets[0].getsockname()[1]
+    socks_address = f"127.0.0.1:{socks_port}"
+    auth_fixture = SocksProxyFixture(credentials=("user", "socks-secret"))
+    auth_server = await asyncio.start_server(auth_fixture.handle, "127.0.0.1", 0)
+    auth_port = auth_server.sockets[0].getsockname()[1]
+    auth_address = f"127.0.0.1:{auth_port}"
     try:
         _verify_middleware_api(proxy_address)
         await _verify_downloader_parity(proxy_address, fixture)
         await _verify_proxy_client_pools(proxy_address, origin_url)
         await _verify_environment_and_bypasses(proxy_address, fixture, origin_url)
+        await _verify_socks_protocols(socks_address, socks_fixture, origin_port, tls_port)
+        await _verify_socks_authentication(auth_address, auth_fixture, origin_port)
+        await _verify_socks_environment(socks_address, socks_fixture, origin_port)
     finally:
         proxy_server.close()
         origin_server.close()
+        tls_server.close()
+        socks_server.close()
+        auth_server.close()
         await proxy_server.wait_closed()
         await origin_server.wait_closed()
+        await tls_server.wait_closed()
+        await socks_server.wait_closed()
+        await auth_server.wait_closed()
 
 
 if __name__ == "__main__":
     asyncio.run(_verify())
     print(
-        "Proxy support passed: explicit and environment proxies, authentication, redirects, "
-        "bypasses, disabled middleware, Python and Rust downloaders, and cleanup"
+        "Proxy support passed: HTTP, HTTPS, SOCKS4, SOCKS4a, SOCKS5, and SOCKS5h; "
+        "explicit and environment routing; authentication; redirects and retries; bypasses; "
+        "Python and Rust downloaders; and cleanup"
     )

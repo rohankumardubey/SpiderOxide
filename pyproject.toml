@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.27,<1",
+    "httpx-socks[asyncio]>=0.13,<0.14",
     "itemadapter>=0.13,<1",
     "itemloaders>=1.4,<2",
     "lxml>=4.9,<7",

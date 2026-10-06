@@ -67,7 +67,7 @@ Scrapy.
 * Streaming HTTP downloads with repeated header support
 * Pooled asynchronous Rust HTTP downloader with HTTP/2 and Rustls
 * Scheme-aware download handlers for HTTP, HTTPS, data URIs, local files, FTP, and S3
-* Authenticated HTTP and HTTPS proxy routing with per-proxy connection pools
+* Authenticated HTTP, HTTPS, SOCKS4, SOCKS4a, SOCKS5, and SOCKS5h proxy routing
 * Priority-ordered Scrapy-compatible extensions, lifecycle signals, and operational monitoring
 * Streaming Scrapy-compatible JSON, JSON Lines, CSV, XML, Marshal, and Pickle feed exports
 * Filesystem, stdout, FTP, FTPS, S3, and GCS feed storage with gzip, bzip2, and LZMA postprocessing
@@ -746,7 +746,7 @@ missing callback methods, and truncated or malformed files also fail before migr
 ## Proxy support
 
 SpiderOxide enables a Scrapy-compatible `HttpProxyMiddleware` by default. Set `proxy` in request
-metadata to route one request through an HTTP or HTTPS proxy:
+metadata to route one request through an HTTP, HTTPS, SOCKS4, SOCKS4a, SOCKS5, or SOCKS5h proxy:
 
 ```python
 from spideroxide import Request
@@ -758,18 +758,26 @@ request = Request(
 )
 ```
 
+SOCKS proxies use the same `proxy` metadata key; for example, use a `socks5h://` URL when DNS
+resolution must happen at the proxy.
+
 Proxy credentials are removed from the normalized metadata URL and sent only as proxy
 authentication. Redirected and retried requests retain the selected proxy. Set
 `request.meta["proxy"]` to `None` to bypass proxy discovery for one request.
 
-When no explicit proxy is present, SpiderOxide discovers standard `http_proxy`, `https_proxy`, and
-`no_proxy` configuration from the environment and operating system. Set `HTTPPROXY_ENABLED` to
-`False` to disable this behavior. `HTTPPROXY_AUTH_ENCODING` controls Basic authentication encoding
-and defaults to `latin-1`.
+`socks4://` and `socks5://` resolve destination names locally. Use `socks4a://` or `socks5h://`
+when destination DNS must be resolved by the proxy. SOCKS5 username/password authentication is
+supported; SOCKS4 authentication is rejected consistently by both downloaders.
+
+When no explicit proxy is present, SpiderOxide discovers standard `http_proxy`, `https_proxy`,
+`all_proxy`, and `no_proxy` configuration from the environment and operating system. Set
+`HTTPPROXY_ENABLED` to `False` to disable this behavior. `HTTPPROXY_AUTH_ENCODING` controls HTTP
+Basic authentication encoding and defaults to `latin-1`.
 
 Both downloaders pool connections separately for each proxy and authentication identity. The Rust
-downloader owns its Reqwest proxy-client pool and applies `Proxy-Authorization` at the proxy layer so
-credentials are not forwarded to direct target servers. SOCKS proxies are not currently supported.
+downloader owns its Reqwest proxy-client pool and applies HTTP `Proxy-Authorization` at the proxy
+layer so credentials are not forwarded to direct target servers. SOCKS credentials are kept out of
+the normalized proxy URL, target request headers, error messages, and statistics.
 
 ## Extensions
 
@@ -1387,8 +1395,8 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include SOCKS proxy support and Twisted interoperability. Exact third-party component
-compatibility and production hardening also remain ongoing work.
+Known gaps include Twisted interoperability. Exact third-party component compatibility and
+production hardening also remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,
 callback, middleware, pipeline, and extension layer. The Python core backend will remain available
