@@ -18,6 +18,34 @@ class DownloadError(SpiderOxideError):
     """Raised when a request cannot be downloaded."""
 
 
+class DownloadFailedError(DownloadError):
+    """Raised when a network request fails."""
+
+
+class DownloadTimeoutError(DownloadFailedError):
+    """Raised when a request exceeds its download timeout."""
+
+
+class CannotResolveHostError(DownloadFailedError):
+    """Raised when a target hostname cannot be resolved."""
+
+
+class DownloadConnectionRefusedError(DownloadFailedError):
+    """Raised when a target or proxy refuses a connection."""
+
+
+class UnsupportedURLSchemeError(DownloadFailedError):
+    """Raised when the transport cannot handle a URL scheme."""
+
+
+class ResponseDataLossError(DownloadFailedError):
+    """Raised when a response body ends before its declared length."""
+
+
+class DownloadCancelledError(DownloadError):
+    """Raised when downloader limits cancel a response."""
+
+
 class NotSupported(SpiderOxideError):
     """Raised when no download handler supports a request URL scheme."""
 

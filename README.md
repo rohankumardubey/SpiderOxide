@@ -508,6 +508,36 @@ result = asyncio.run(
 `ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
 requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
 
+## Networking configuration
+
+The HTTPX and Rust downloaders share the same DNS, TLS, connection, and response-integrity
+settings:
+
+| Setting | Purpose |
+|---|---|
+| `DNS_RESOLVER` | Select IPv4-only `CachingThreadedResolver` or IPv4/IPv6 `CachingHostnameResolver` behavior |
+| `DNSCACHE_ENABLED`, `DNSCACHE_SIZE`, `DNS_TIMEOUT` | Control bounded DNS caching and lookup timeouts |
+| `DOWNLOAD_BIND_ADDRESS` | Bind outbound TCP connections to a local address |
+| `DOWNLOAD_VERIFY_CERTIFICATES` | Enable server certificate and hostname verification |
+| `DOWNLOADER_CLIENTCONTEXTFACTORY` | Select Scrapy's permissive or browser-like verifying TLS policy |
+| `DOWNLOAD_TLS_MIN_VERSION`, `DOWNLOAD_TLS_MAX_VERSION` | Restrict accepted TLS protocol versions |
+| `DOWNLOADER_CLIENT_TLS_CIPHERS` | Configure OpenSSL ciphers for the HTTPX backend; the Rust backend currently accepts Scrapy's `DEFAULT` value |
+| `DOWNLOADER_CLIENT_CERTIFICATE`, `DOWNLOADER_CLIENT_KEY` | Load a PEM client identity for mutual TLS; Rust requires an unencrypted private key |
+| `DOWNLOADER_CLIENT_TLS_VERBOSE_LOGGING` | Log negotiated TLS protocol and cipher diagnostics |
+| `HTTPX_HTTP2_ENABLED` | Allow HTTP/2 negotiation; disabled by default for Scrapy compatibility |
+| `DOWNLOAD_FAIL_ON_DATALOSS` | Raise `ResponseDataLossError` for truncated response bodies |
+
+> [!WARNING]
+> For Scrapy 2.19 compatibility, `DOWNLOAD_VERIFY_CERTIFICATES` defaults to `False`. This accepts
+> untrusted and hostname-mismatched certificates. Set it to `True` for production crawls unless
+> certificate verification is intentionally handled by an isolated test environment.
+
+Responses expose the negotiated HTTP protocol, peer IP address, and leaf certificate when the
+transport provides them. DNS failures, connection refusals, unsupported schemes, timeouts,
+truncated bodies, and size cancellations use the same public exception types across both
+downloaders. Per-request `download_timeout` and `download_fail_on_dataloss` metadata override their
+global settings.
+
 ## CrawlSpider and link extraction
 
 `LinkExtractor` and `LxmlLinkExtractor` provide Scrapy-compatible URL, domain, extension, text,
