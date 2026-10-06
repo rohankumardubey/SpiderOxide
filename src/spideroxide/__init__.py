@@ -48,15 +48,22 @@ from .downloadhandlers import (
 )
 from .engine import CrawlResult, NativeCrawlEngine
 from .exceptions import (
+    CannotResolveHostError,
     CloseSpider,
     DontCloseSpider,
+    DownloadCancelledError,
+    DownloadConnectionRefusedError,
     DownloadError,
+    DownloadFailedError,
+    DownloadTimeoutError,
     DropItem,
     IgnoreRequest,
     NotConfigured,
     NotSupported,
+    ResponseDataLossError,
     SpiderOxideError,
     StopDownload,
+    UnsupportedURLSchemeError,
 )
 from .extensions import ExtensionManager
 from .feedexport import (
@@ -186,6 +193,7 @@ __all__ = [
     "BaseSpiderMiddleware",
     "BlockingFeedStorage",
     "Bz2Plugin",
+    "CannotResolveHostError",
     "CloseSpider",
     "CloseSpiderExtension",
     "Compose",
@@ -199,6 +207,10 @@ __all__ = [
     "CrawlResult",
     "CsvItemExporter",
     "DownloadError",
+    "DownloadCancelledError",
+    "DownloadConnectionRefusedError",
+    "DownloadFailedError",
+    "DownloadTimeoutError",
     "DontCloseSpider",
     "DownloadHandler",
     "DownloadHandlers",
@@ -288,6 +300,7 @@ __all__ = [
     "RefererMiddleware",
     "ReferrerPolicy",
     "Response",
+    "ResponseDataLossError",
     "RetryMiddleware",
     "Rule",
     "S3FeedStorage",
@@ -316,6 +329,7 @@ __all__ = [
     "StrictOriginWhenCrossOriginPolicy",
     "StdoutFeedStorage",
     "TextResponse",
+    "UnsupportedURLSchemeError",
     "TakeFirst",
     "UnsafeUrlPolicy",
     "UrlLengthMiddleware",

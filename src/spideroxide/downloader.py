@@ -3,10 +3,13 @@ from __future__ import annotations
 import asyncio
 import codecs
 import concurrent.futures
+import logging
 import math
 import mimetypes
+import socket
 import threading
 from collections.abc import Callable, Iterable
+from ipaddress import ip_address
 from typing import TYPE_CHECKING, Protocol
 from urllib.parse import urlsplit
 
@@ -15,13 +18,35 @@ import httpx
 from . import signals
 from .backend import BackendUnavailableError
 from .cookies import _request_cookie_header
-from .exceptions import DownloadError, StopDownload
+from .exceptions import (
+    CannotResolveHostError,
+    DownloadCancelledError,
+    DownloadConnectionRefusedError,
+    DownloadError,
+    DownloadFailedError,
+    DownloadTimeoutError,
+    ResponseDataLossError,
+    StopDownload,
+    UnsupportedURLSchemeError,
+)
 from .headers import Headers
 from .http import HtmlResponse, Request, Response, TextResponse, XmlResponse
+from .networking import (
+    CachingResolver,
+    bind_host,
+    client_identity_pem,
+    install_httpx_resolver,
+    make_ssl_context,
+    resolver_family,
+    tls_debug_info,
+    verifies_certificates,
+)
 from .settings import Settings
 
 if TYPE_CHECKING:
     from .crawler import Crawler
+
+logger = logging.getLogger(__name__)
 
 
 class Downloader(Protocol):
@@ -113,6 +138,8 @@ def _response(
     body: bytes,
     protocol: str,
     flags: Iterable[str] = (),
+    certificate: bytes | None = None,
+    remote_ip: str | None = None,
 ) -> Response:
     headers = Headers()
     for name, value in header_pairs:
@@ -126,6 +153,8 @@ def _response(
         request=request,
         protocol=protocol,
         flags=flags,
+        certificate=certificate,
+        ip_address=None if remote_ip is None else ip_address(remote_ip),
     )
 
 
@@ -252,6 +281,47 @@ def _request_max_size(request: Request, default: int) -> int:
     return max_size
 
 
+def _request_warn_size(request: Request, default: int) -> int:
+    value = request.meta.get("download_warnsize", default)
+    try:
+        warn_size = int(value)
+    except (TypeError, ValueError) as error:
+        raise DownloadError("download_warnsize must be a non-negative integer") from error
+    if warn_size < 0:
+        raise DownloadError("download_warnsize must be a non-negative integer")
+    return warn_size
+
+
+def _is_data_loss(error: Exception) -> bool:
+    return isinstance(error, httpx.RemoteProtocolError) and (
+        "incomplete message body" in str(error).lower()
+        or "peer closed connection" in str(error).lower()
+    )
+
+
+def _httpx_download_error(request: Request, timeout: float, error: Exception) -> DownloadError:
+    if isinstance(error, httpx.TimeoutException):
+        return DownloadTimeoutError(f"Getting {request.url} timed out after {timeout} seconds.")
+    if isinstance(error, httpx.UnsupportedProtocol):
+        return UnsupportedURLSchemeError(str(error))
+    if isinstance(error, httpx.ConnectError):
+        cause: BaseException | None = error
+        while cause is not None:
+            if isinstance(cause, socket.gaierror):
+                return CannotResolveHostError(str(error))
+            if isinstance(cause, OSError) and cause.errno in {54, 61, 111}:
+                return DownloadConnectionRefusedError(str(error))
+            cause = cause.__cause__ or cause.__context__
+        detail = str(error).lower()
+        if "name or service not known" in detail or "nodename nor servname" in detail:
+            return CannotResolveHostError(str(error))
+        if "refused" in detail:
+            return DownloadConnectionRefusedError(str(error))
+    if isinstance(error, httpx.ProxyError):
+        return DownloadConnectionRefusedError(str(error))
+    return DownloadFailedError(str(error) or type(error).__name__)
+
+
 class HttpxDownloader:
     def __init__(
         self,
@@ -262,12 +332,29 @@ class HttpxDownloader:
     ) -> None:
         self.settings = settings or Settings()
         timeout, self.max_size, user_agent = _download_settings(self.settings)
+        self.warn_size = self.settings.getint("DOWNLOAD_WARNSIZE", 32 * 1024 * 1024)
+        if self.warn_size < 0:
+            raise ValueError("DOWNLOAD_WARNSIZE cannot be negative")
         self._timeout = timeout
         self._user_agent = user_agent
         self._transport = transport
         self._crawler = crawler
         self._standalone = crawler is None
         self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
+        self._fail_on_dataloss = self.settings.getbool("DOWNLOAD_FAIL_ON_DATALOSS", True)
+        self._tls_verbose = self.settings.getbool(
+            "DOWNLOADER_CLIENT_TLS_VERBOSE_LOGGING",
+            False,
+        )
+        self._ssl_context = make_ssl_context(self.settings)
+        self._resolver = CachingResolver(self.settings)
+        self._http2 = self.settings.getbool("HTTPX_HTTP2_ENABLED", False)
+        max_connections = self.settings.getint("CONCURRENT_REQUESTS", 16) or None
+        self._limits = httpx.Limits(
+            max_connections=max_connections,
+            max_keepalive_connections=max_connections,
+        )
+        self._bind_host = bind_host(self.settings)
         self.client = self._create_client()
         self._proxy_clients: dict[
             tuple[str, bytes | None, tuple[str, str] | None],
@@ -302,15 +389,32 @@ class HttpxDownloader:
                 username=username,
                 password=password,
                 rdns=parsed_proxy.scheme in {"socks4a", "socks5h"},
+                verify=self._ssl_context,
+                limits=self._limits,
                 trust_env=False,
             )
-        elif proxy is not None:
-            proxy_config = httpx.Proxy(
-                proxy,
-                headers=(
-                    None if authorization is None else [(b"Proxy-Authorization", authorization)]
-                ),
+        elif self._transport is None:
+            proxy_config = (
+                None
+                if proxy is None
+                else httpx.Proxy(
+                    proxy,
+                    headers=(
+                        None if authorization is None else [(b"Proxy-Authorization", authorization)]
+                    ),
+                )
             )
+            transport = httpx.AsyncHTTPTransport(
+                verify=self._ssl_context,
+                http2=self._http2,
+                limits=self._limits,
+                proxy=proxy_config,
+                local_address=self._bind_host,
+                trust_env=False,
+            )
+            install_httpx_resolver(transport, self._resolver)
+        elif proxy is not None:
+            raise ValueError("custom HTTPX transports cannot be combined with proxies")
         client = httpx.AsyncClient(
             timeout=self._timeout,
             follow_redirects=False,
@@ -318,7 +422,6 @@ class HttpxDownloader:
             if self._standalone and self._user_agent
             else None,
             transport=transport,
-            proxy=proxy_config,
             trust_env=False,
         )
         if not self._standalone:
@@ -330,6 +433,10 @@ class HttpxDownloader:
     async def fetch(self, request: Request) -> Response:
         timeout = _request_timeout(request, self._timeout)
         max_size = _request_max_size(request, self.max_size)
+        warn_size = _request_warn_size(request, self.warn_size)
+        fail_on_dataloss = bool(
+            request.meta.get("download_fail_on_dataloss", self._fail_on_dataloss)
+        )
         proxy, authorization, proxy_auth = _proxy_details(request)
         if proxy is None:
             client = self.client
@@ -359,6 +466,9 @@ class HttpxDownloader:
                 response_headers = Headers()
                 for name, value in raw_response.headers.multi_items():
                     response_headers.appendlist(name, value)
+                remote_ip, certificate, tls_detail = tls_debug_info(raw_response)
+                if self._tls_verbose and tls_detail is not None:
+                    logger.debug("SSL connection to %s using %s", request.url, tls_detail)
                 stop = _stop_download(
                     self._crawler,
                     signals.headers_received,
@@ -369,27 +479,55 @@ class HttpxDownloader:
                 )
                 declared_size = int(raw_response.headers.get("Content-Length", 0))
                 if stop is None and max_size and declared_size > max_size:
-                    raise DownloadError(f"response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)")
+                    raise DownloadCancelledError(
+                        f"response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)"
+                    )
+                warned = bool(warn_size and declared_size > warn_size)
+                if warned:
+                    logger.warning(
+                        "Expected response size (%s bytes) exceeds DOWNLOAD_WARNSIZE "
+                        "(%s bytes) for %s",
+                        declared_size,
+                        warn_size,
+                        request,
+                    )
                 body = bytearray()
+                flags: tuple[str, ...] = ()
                 if stop is None:
                     chunks = (
                         raw_response.aiter_bytes() if self._standalone else raw_response.aiter_raw()
                     )
-                    async for chunk in chunks:
-                        body.extend(chunk)
-                        stop = _stop_download(
-                            self._crawler,
-                            signals.bytes_received,
-                            data=chunk,
-                            request=request,
-                            spider=None if self._crawler is None else self._crawler.spider,
-                        )
-                        if stop is not None:
-                            break
-                        if max_size and len(body) > max_size:
-                            raise DownloadError(
-                                f"response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)"
+                    try:
+                        async for chunk in chunks:
+                            body.extend(chunk)
+                            stop = _stop_download(
+                                self._crawler,
+                                signals.bytes_received,
+                                data=chunk,
+                                request=request,
+                                spider=None if self._crawler is None else self._crawler.spider,
                             )
+                            if stop is not None:
+                                break
+                            if max_size and len(body) > max_size:
+                                raise DownloadCancelledError(
+                                    f"response exceeded DOWNLOAD_MAXSIZE ({max_size} bytes)"
+                                )
+                            if warn_size and len(body) > warn_size and not warned:
+                                warned = True
+                                logger.warning(
+                                    "Received response size (%s bytes) exceeds "
+                                    "DOWNLOAD_WARNSIZE (%s bytes) for %s",
+                                    len(body),
+                                    warn_size,
+                                    request,
+                                )
+                    except httpx.HTTPError as error:
+                        if not _is_data_loss(error):
+                            raise
+                        if fail_on_dataloss:
+                            raise ResponseDataLossError(str(error)) from error
+                        flags = ("dataloss",)
 
                 response = _response(
                     request,
@@ -398,16 +536,29 @@ class HttpxDownloader:
                     header_pairs=response_headers.to_raw_pairs(),
                     body=bytes(body),
                     protocol=raw_response.http_version,
-                    flags=("download_stopped",) if stop is not None else (),
+                    flags=("download_stopped",) if stop is not None else flags,
+                    certificate=certificate,
+                    remote_ip=remote_ip,
                 )
                 if stop is not None:
                     stop.response = response
                     if stop.fail:
                         raise stop
                 return response
+        except DownloadError:
+            raise
+        except socket.gaierror as error:
+            raise CannotResolveHostError(str(error)) from error
+        except TimeoutError as error:
+            raise DownloadTimeoutError(
+                f"Getting {request.url} timed out after {timeout} seconds."
+            ) from error
+        except OSError as error:
+            if error.errno in {54, 61, 111}:
+                raise DownloadConnectionRefusedError(str(error)) from error
+            raise DownloadFailedError(str(error)) from error
         except httpx.HTTPError as error:
-            detail = str(error) or type(error).__name__
-            raise DownloadError(f"unable to download {request.url}: {detail}") from error
+            raise _httpx_download_error(request, timeout, error) from error
 
     async def close(self) -> None:
         clients = [self.client, *self._proxy_clients.values()]
@@ -441,8 +592,25 @@ class RustDownloader:
         self.settings = settings or Settings()
         self._crawler = crawler
         timeout, max_size, user_agent = _download_settings(self.settings)
+        warn_size = self.settings.getint("DOWNLOAD_WARNSIZE", 32 * 1024 * 1024)
+        if warn_size < 0:
+            raise ValueError("DOWNLOAD_WARNSIZE cannot be negative")
+        ciphers = self.settings.get("DOWNLOADER_CLIENT_TLS_CIPHERS", "DEFAULT")
+        if ciphers not in {None, "", "DEFAULT"}:
+            raise ValueError("Rust downloader currently supports the default TLS cipher suite only")
+        if self.settings.get("DOWNLOADER_CLIENT_TLS_METHOD", "TLS") != "TLS":
+            raise ValueError("DOWNLOADER_CLIENT_TLS_METHOD must be 'TLS'")
         try:
-            from ._native import NativeDownloadError, NativeHttpClient
+            from ._native import (
+                NativeCannotResolveHostError,
+                NativeConnectionRefusedError,
+                NativeDownloadCancelledError,
+                NativeDownloadError,
+                NativeDownloadTimeoutError,
+                NativeHttpClient,
+                NativeResponseDataLossError,
+                NativeUnsupportedSchemeError,
+            )
         except ImportError as error:
             raise BackendUnavailableError(
                 "Rust downloader requested but the extension is unavailable; "
@@ -450,13 +618,39 @@ class RustDownloader:
             ) from error
 
         self._download_error: type[Exception] = NativeDownloadError
+        self._native_error_types = (
+            (NativeDownloadCancelledError, DownloadCancelledError),
+            (NativeDownloadTimeoutError, DownloadTimeoutError),
+            (NativeCannotResolveHostError, CannotResolveHostError),
+            (NativeConnectionRefusedError, DownloadConnectionRefusedError),
+            (NativeUnsupportedSchemeError, UnsupportedURLSchemeError),
+            (NativeResponseDataLossError, ResponseDataLossError),
+        )
         self._cookies_enabled = self.settings.getbool("COOKIES_ENABLED", True)
+        self._warn_size = warn_size
+        self._fail_on_dataloss = self.settings.getbool("DOWNLOAD_FAIL_ON_DATALOSS", True)
         standalone = crawler is None
+        minimum = self.settings.get("DOWNLOAD_TLS_MIN_VERSION")
+        maximum = self.settings.get("DOWNLOAD_TLS_MAX_VERSION")
         self._client: object | None = NativeHttpClient(
             timeout,
             max_size,
+            warn_size,
             user_agent if standalone else None,
             standalone,
+            verifies_certificates(self.settings),
+            client_identity_pem(self.settings),
+            None if minimum is None else str(minimum),
+            None if maximum is None else str(maximum),
+            self.settings.getbool("HTTPX_HTTP2_ENABLED", False),
+            bind_host(self.settings),
+            self.settings.getint("CONCURRENT_REQUESTS_PER_DOMAIN", 8),
+            self.settings.getbool("DOWNLOADER_CLIENT_TLS_VERBOSE_LOGGING", False),
+            self.settings.getbool("DNSCACHE_ENABLED", True),
+            self.settings.getint("DNSCACHE_SIZE", 10000),
+            self.settings.getfloat("DNS_TIMEOUT", 60.0),
+            resolver_family(self.settings) != socket.AF_INET,
+            self._fail_on_dataloss,
         )
 
     async def fetch(self, request: Request) -> Response:
@@ -467,6 +661,10 @@ class RustDownloader:
         max_size = _request_max_size(
             request,
             self.settings.getint("DOWNLOAD_MAXSIZE", 0),
+        )
+        warn_size = _request_warn_size(request, self._warn_size)
+        fail_on_dataloss = bool(
+            request.meta.get("download_fail_on_dataloss", self._fail_on_dataloss)
         )
         proxy, authorization, proxy_auth = _proxy_details(request)
         stopped: list[StopDownload] = []
@@ -536,11 +734,27 @@ class RustDownloader:
                 native_bytes_callback,
                 timeout,
                 max_size,
+                warn_size,
+                fail_on_dataloss,
             )
         except self._download_error as error:
-            raise DownloadError(str(error)) from error
+            for native_type, public_type in self._native_error_types:
+                if isinstance(error, native_type):
+                    raise public_type(str(error)) from error
+            raise DownloadFailedError(str(error)) from error
 
         request.meta["download_latency"] = raw_response.latency
+        if raw_response.warned:
+            logger.warning(
+                "Response size exceeds DOWNLOAD_WARNSIZE (%s bytes) for %s",
+                warn_size,
+                request,
+            )
+        flags = []
+        if raw_response.stopped:
+            flags.append("download_stopped")
+        if raw_response.dataloss:
+            flags.append("dataloss")
         response = _response(
             request,
             url=raw_response.url,
@@ -548,7 +762,9 @@ class RustDownloader:
             header_pairs=raw_response.headers,
             body=raw_response.body,
             protocol=raw_response.protocol,
-            flags=("download_stopped",) if raw_response.stopped else (),
+            flags=flags,
+            certificate=raw_response.certificate,
+            remote_ip=raw_response.ip_address,
         )
         if stopped:
             stop = stopped[0]

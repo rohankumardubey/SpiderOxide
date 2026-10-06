@@ -34,6 +34,12 @@ use runtime::shutdown_async_runtime;
 use slots::{NativeDownloadSlotLease, NativeDownloadSlotManager};
 
 pyo3::create_exception!(_native, NativeDownloadError, pyo3::exceptions::PyException);
+pyo3::create_exception!(_native, NativeDownloadCancelledError, NativeDownloadError);
+pyo3::create_exception!(_native, NativeDownloadTimeoutError, NativeDownloadError);
+pyo3::create_exception!(_native, NativeCannotResolveHostError, NativeDownloadError);
+pyo3::create_exception!(_native, NativeConnectionRefusedError, NativeDownloadError);
+pyo3::create_exception!(_native, NativeUnsupportedSchemeError, NativeDownloadError);
+pyo3::create_exception!(_native, NativeResponseDataLossError, NativeDownloadError);
 
 type RequestTuple = (String, String, Vec<u8>, i64);
 
@@ -298,6 +304,30 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add(
         "NativeDownloadError",
         module.py().get_type::<NativeDownloadError>(),
+    )?;
+    module.add(
+        "NativeDownloadCancelledError",
+        module.py().get_type::<NativeDownloadCancelledError>(),
+    )?;
+    module.add(
+        "NativeDownloadTimeoutError",
+        module.py().get_type::<NativeDownloadTimeoutError>(),
+    )?;
+    module.add(
+        "NativeCannotResolveHostError",
+        module.py().get_type::<NativeCannotResolveHostError>(),
+    )?;
+    module.add(
+        "NativeConnectionRefusedError",
+        module.py().get_type::<NativeConnectionRefusedError>(),
+    )?;
+    module.add(
+        "NativeUnsupportedSchemeError",
+        module.py().get_type::<NativeUnsupportedSchemeError>(),
+    )?;
+    module.add(
+        "NativeResponseDataLossError",
+        module.py().get_type::<NativeResponseDataLossError>(),
     )?;
     module.add_class::<NativeHttpClient>()?;
     module.add_class::<NativeHttpResponse>()?;
