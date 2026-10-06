@@ -722,6 +722,27 @@ after the spider closes. The directory contains Python pickle payloads for user-
 values, so it must be treated with the same trust as source code. Start a new job directory after
 changing incompatible callback names or upgrading across incompatible SpiderOxide versions.
 
+SpiderOxide also performs a one-time, source-preserving import when `JOBDIR` contains a Scrapy 2.19
+layout but no `job.sqlite3`. The import supports Scrapy's standard priority queue with Pickle or
+Marshal FIFO/LIFO disk queues, separate start-request queues, 20-byte request fingerprints,
+protocol-4 `spider.state`, and the built-in `Request`, `FormRequest`, and `JsonRequest` classes.
+Callbacks and errbacks are resolved by name against the running spider.
+
+The compatibility boundary is explicit:
+
+| Producer | Reader | Contract |
+|---|---|---|
+| SpiderOxide | SpiderOxide | Native SQLite schemas 1-3 are readable; older native schemas migrate to schema 3 |
+| Scrapy 2.19 | SpiderOxide | Supported standard layouts are copied atomically into schema 3 and marked with migration version 1 |
+| SpiderOxide | Scrapy 2.19 | Not supported; SpiderOxide writes only its native SQLite format |
+
+Scrapy source files are never deleted or rewritten, so they remain an unchanged downgrade snapshot;
+they do not receive progress made after SpiderOxide starts. Reopening the directory in SpiderOxide
+uses only `job.sqlite3`. A directory containing unmarked native and Scrapy state is rejected as
+ambiguous. Custom priority queues, custom request classes, unsupported fingerprint lengths,
+missing callback methods, and truncated or malformed files also fail before migration writes
+`job.sqlite3`.
+
 ## Proxy support
 
 SpiderOxide enables a Scrapy-compatible `HttpProxyMiddleware` by default. Set `proxy` in request

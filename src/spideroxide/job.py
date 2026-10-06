@@ -14,6 +14,12 @@ _REQUEST_TYPES: dict[str, type[Request]] = {
     "FormRequest": FormRequest,
     "JsonRequest": JsonRequest,
 }
+_SCRAPY_REQUEST_TYPES: dict[str | None, type[Request]] = {
+    None: Request,
+    "scrapy.http.request.Request": Request,
+    "scrapy.http.request.form.FormRequest": FormRequest,
+    "scrapy.http.request.json_request.JsonRequest": JsonRequest,
+}
 
 
 def _callback_name(spider: Spider, callback: object, field: str) -> str | None:
@@ -123,6 +129,34 @@ def deserialize_request(payload: bytes, spider: Spider) -> Request:
         cb_kwargs=values["cb_kwargs"],
         **request_kwargs,
     )
+
+
+def request_from_scrapy_dict(values: object, spider: Spider) -> Request:
+    if not isinstance(values, Mapping):
+        raise ValueError("Scrapy persisted request is not a mapping")
+    class_name = values.get("_class")
+    if class_name is not None and not isinstance(class_name, str):
+        raise ValueError("Scrapy persisted request class name must be a string")
+    request_type = _SCRAPY_REQUEST_TYPES.get(class_name)
+    if request_type is None:
+        raise ValueError(f"unsupported Scrapy persisted request class: {class_name!r}")
+
+    kwargs = {name: values[name] for name in request_type.attributes if name in values}
+    if "url" not in kwargs:
+        raise ValueError("Scrapy persisted request does not contain a URL")
+    encoding = kwargs.get("encoding", "utf-8")
+    if not isinstance(encoding, str):
+        raise ValueError("Scrapy persisted request encoding must be a string")
+    raw_headers = kwargs.get("headers", {})
+    if not isinstance(raw_headers, (Mapping, list, tuple)):
+        raise ValueError("Scrapy persisted request headers are invalid")
+    kwargs["headers"] = Headers(raw_headers, encoding=encoding)
+    kwargs["callback"] = _resolve_callback(spider, values.get("callback"), "callback")
+    kwargs["errback"] = _resolve_callback(spider, values.get("errback"), "errback")
+    try:
+        return request_type(**kwargs)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"Scrapy persisted request is invalid: {error}") from error
 
 
 def serialize_spider_state(state: object) -> bytes:

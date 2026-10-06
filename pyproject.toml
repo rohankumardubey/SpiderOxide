@@ -29,7 +29,7 @@ dependencies = [
     "itemloaders>=1.4,<2",
     "lxml>=4.9,<7",
     "parsel>=1.10,<2",
-    "w3lib>=2.4,<3",
+    "w3lib>=2.4,<2.5",
 ]
 
 [project.urls]

@@ -558,6 +558,64 @@ def _cli_project_tooling() -> dict[str, object]:
     return commands
 
 
+def _persistence_project_interoperability() -> dict[str, object]:
+    class PersistenceSpider(Spider):
+        name = "persistence"
+
+        def parse_page(self, response: Response, expected: int) -> None:
+            pass
+
+    spider = PersistenceSpider()
+    request = Request(
+        "https://example.test/persist",
+        callback=spider.parse_page,
+        method="POST",
+        headers={"X-Value": ["first", "second"]},
+        body=b"payload",
+        cookies={"session": "value"},
+        meta={"depth": 2, "is_start_request": True},
+        encoding="utf-8",
+        priority=17,
+        flags=["persisted"],
+        cb_kwargs={"expected": 2},
+    )
+    restored = request_from_dict(request.to_dict(spider=spider), spider=spider)
+    settings = Settings()
+    header_names = list(restored.headers)
+    return {
+        "request": {
+            "type": type(restored).__name__,
+            "url": restored.url,
+            "callback": restored.callback.__name__ if restored.callback else None,
+            "method": restored.method,
+            "headers": [
+                [
+                    name.decode("latin-1") if isinstance(name, bytes) else name,
+                    [value.decode("latin-1") for value in restored.headers.getlist(name)],
+                ]
+                for name in header_names
+            ],
+            "body": restored.body.decode(),
+            "cookies": restored.cookies,
+            "meta": restored.meta,
+            "encoding": restored.encoding,
+            "priority": restored.priority,
+            "dont_filter": restored.dont_filter,
+            "flags": list(restored.flags),
+            "cb_kwargs": restored.cb_kwargs,
+        },
+        "queues": {
+            name: settings.get(name)
+            for name in (
+                "SCHEDULER_MEMORY_QUEUE",
+                "SCHEDULER_DISK_QUEUE",
+                "SCHEDULER_START_MEMORY_QUEUE",
+                "SCHEDULER_START_DISK_QUEUE",
+            )
+        },
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -572,6 +630,7 @@ def main() -> None:
         "cli-project-tooling": _cli_project_tooling(),
         "exporters-feed-storage-media": _exporters_feed_storage_media(),
         "http-models": _http_models(),
+        "persistence-project-interoperability": _persistence_project_interoperability(),
         "request-identity": _request_identity(),
         "runtime-api": _runtime_api(),
         "selectors-items-links": _selectors_items_links(),
