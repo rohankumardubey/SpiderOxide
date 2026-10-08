@@ -571,7 +571,14 @@ def install() -> None:
     from spideroxide.operational import CloseSpider as CloseSpiderExtension
     from spideroxide.pipelines import FSFilesStore
     from spideroxide.robots import RobotsTxtMiddleware
-    from spideroxide.trackref import live_refs, object_ref
+    from spideroxide.trackref import (
+        format_live_refs,
+        get_oldest,
+        iter_all,
+        live_refs,
+        object_ref,
+        print_live_refs,
+    )
     from spideroxide.types import ItemMeta
 
     http = {
@@ -992,4 +999,14 @@ def install() -> None:
             "url_is_from_spider": url_is_from_spider,
         },
     )
-    _module("scrapy.utils.trackref", {"live_refs": live_refs, "object_ref": object_ref})
+    _module(
+        "scrapy.utils.trackref",
+        {
+            "format_live_refs": format_live_refs,
+            "get_oldest": get_oldest,
+            "iter_all": iter_all,
+            "live_refs": live_refs,
+            "object_ref": object_ref,
+            "print_live_refs": print_live_refs,
+        },
+    )

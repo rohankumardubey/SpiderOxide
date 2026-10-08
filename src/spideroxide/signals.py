@@ -71,6 +71,22 @@ class SignalManager:
         receivers.remove(receiver)
         return True
 
+    def disconnect_all(self, signal: str) -> None:
+        self._receivers.pop(signal, None)
+
+    async def wait_for(self, signal: str) -> None:
+        future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+
+        def handle() -> None:
+            if not future.done():
+                future.set_result(None)
+
+        self.connect(handle, signal)
+        try:
+            await future
+        finally:
+            self.disconnect(handle, signal)
+
     async def send(
         self, signal: str, **kwargs: object
     ) -> list[tuple[Callable[..., object], object | SignalFailure]]:
@@ -98,6 +114,19 @@ class SignalManager:
                 response = SignalFailure(error)
             responses.append((receiver, response))
         return responses
+
+    async def send_catch_log_async(
+        self,
+        signal: str,
+        *,
+        dont_log: type[BaseException] | tuple[type[BaseException], ...] = (),
+        **kwargs: object,
+    ) -> list[tuple[Callable[..., object], object]]:
+        responses = await self.send_catch_log(signal, dont_log=dont_log, **kwargs)
+        return [
+            (receiver, result.exception if isinstance(result, SignalFailure) else result)
+            for receiver, result in responses
+        ]
 
     def send_sync(
         self,

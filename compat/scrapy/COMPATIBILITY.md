@@ -28,8 +28,9 @@ reports in CI.
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
   project settings loading, object loading, and common encoding and URL helpers
+- Asyncio signal waiting, bulk disconnect, and asynchronous signal dispatch
 - LogFormatter customization and log-record helpers; SMTP mail with deprecation warnings;
-  cURL conversion, JSON serialization, job-directory, and URL helper APIs
+  cURL conversion, JSON serialization, job-directory, URL, and live-reference debugging helpers
 - One-time import of standard Scrapy 2.19 `JOBDIR` layouts into SpiderOxide's native persistence
   format, including queued requests, duplicate fingerprints, callbacks, priorities, and spider state
 
