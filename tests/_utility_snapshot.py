@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
+import re
 import sys
 import warnings
-from io import BytesIO
+from contextlib import redirect_stdout
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -32,6 +35,14 @@ from scrapy.utils.log import (
     logformatter_adapter,
 )
 from scrapy.utils.serialize import ScrapyJSONEncoder
+from scrapy.utils.trackref import (
+    format_live_refs,
+    get_oldest,
+    iter_all,
+    live_refs,
+    object_ref,
+    print_live_refs,
+)
 from scrapy.utils.url import (
     add_http_if_no_scheme,
     guess_scheme,
@@ -211,6 +222,29 @@ def main() -> None:
         "mime": captured["msg"]["Content-Type"],
         "attachment": captured["msg"].get_payload()[1]["Content-Disposition"],
     }
+    live_refs.clear()
+
+    class Tracked(object_ref):
+        pass
+
+    class Ignored(object_ref):
+        pass
+
+    first, second, ignored = Tracked(), Tracked(), Ignored()
+    report = format_live_refs()
+    captured_report = StringIO()
+    with redirect_stdout(captured_report):
+        print_live_refs(ignore=Ignored)
+    output["trackref"] = {
+        "report": re.sub(r"oldest: \d+s ago", "oldest: Ns ago", report),
+        "printed": re.sub(r"oldest: \d+s ago", "oldest: Ns ago", captured_report.getvalue()),
+        "oldest": get_oldest("Tracked") is first,
+        "members": len(tuple(iter_all("Tracked"))),
+        "missing": get_oldest("Missing") is None and not tuple(iter_all("Missing")),
+    }
+    del second, ignored
+    gc.collect()
+    output["trackref"]["remaining"] = len(tuple(iter_all("Tracked")))
     print(json.dumps(output, sort_keys=True, default=lambda value: value.decode("latin-1")))
 
 

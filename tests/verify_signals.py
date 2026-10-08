@@ -21,6 +21,7 @@ from spideroxide import (
     signals,
 )
 from spideroxide.exceptions import IgnoreRequest
+from spideroxide.signals import SignalManager
 
 BODY = b"0123456789" * 4096
 
@@ -371,7 +372,46 @@ async def _verify_lazy_start(base_url: str, engine: str) -> None:
     }
 
 
+async def _verify_signal_helpers() -> None:
+    manager = SignalManager()
+    seen: list[str] = []
+
+    def good() -> str:
+        seen.append("good")
+        return "ok"
+
+    async def bad() -> None:
+        raise ValueError("signal failure")
+
+    manager.connect(good, "ready")
+    manager.connect(bad, "ready")
+    responses = await manager.send_catch_log_async("ready", dont_log=ValueError)
+    assert responses[0] == (good, "ok")
+    assert responses[1][0] is bad
+    assert isinstance(responses[1][1], ValueError)
+    assert seen == ["good"]
+
+    waiter = asyncio.create_task(manager.wait_for("ready"))
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    await manager.send_catch_log("ready", dont_log=ValueError)
+    await asyncio.wait_for(waiter, 1)
+    assert manager._receivers["ready"] == [good, bad]
+
+    cancelled = asyncio.create_task(manager.wait_for("never"))
+    await asyncio.sleep(0)
+    cancelled.cancel()
+    with suppress(asyncio.CancelledError):
+        await cancelled
+    assert not manager._receivers["never"]
+
+    manager.disconnect_all("ready")
+    assert manager.send_sync("ready") == []
+    assert not manager.disconnect(good, "ready")
+
+
 async def _verify() -> None:
+    await _verify_signal_helpers()
     server = await asyncio.start_server(_serve, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
     base_url = f"http://127.0.0.1:{port}"
@@ -394,5 +434,5 @@ if __name__ == "__main__":
     asyncio.run(_verify())
     print(
         "Signals passed: scheduling controls, scheduler and downloader lifecycle, streaming, "
-        "partial downloads, item failures, response context, and Python/Rust parity"
+        "partial downloads, item failures, async helpers, and Python/Rust parity"
     )
