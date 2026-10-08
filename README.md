@@ -19,6 +19,10 @@ SpiderOxide is an experimental, Rust-accelerated web crawling framework with a f
 It combines Python spiders, callbacks, middleware, and pipelines with native scheduling,
 fingerprinting, persistence, policy, and networking components exposed through PyO3.
 
+Use it to turn permitted web sources into structured, refreshable data for search, analytics,
+and AI applications. SpiderOxide handles crawling and extraction; downstream systems handle
+chunking, embeddings, indexing, and model inference.
+
 The project explores how much of a production crawler can move into safe Rust without giving up
 Python extensibility. Its Python and Rust backends follow the same behavioral contract and are
 checked against deterministic workloads before performance is measured.
@@ -72,6 +76,28 @@ Scrapy.
 * Streaming Scrapy-compatible JSON, JSON Lines, CSV, XML, Marshal, and Pickle feed exports
 * Filesystem, stdout, FTP, FTPS, S3, and GCS feed storage with gzip, bzip2, and LZMA postprocessing
 * Safe Rust with no unsafe blocks
+
+## Where SpiderOxide fits in AI workflows
+
+AI applications need current, traceable source data. SpiderOxide can collect and export it without
+tying the crawl to a particular model or vector database:
+
+| Use case | Crawl output |
+|---|---|
+| Retrieval-augmented generation (RAG) | Documentation pages with source URLs and extracted text for a downstream chunking and indexing pipeline |
+| Domain-specific search | Structured listings or articles for a searchable index |
+| Monitoring and research | Repeated snapshots of public catalogs, prices, or notices for change analysis |
+
+**Pipeline:** permitted websites -> SpiderOxide spiders and pipelines -> JSON Lines or other feed
+exports -> your cleaning, indexing, and AI services. For example, the
+[`scrapy crawl catalog -O items.jsonl:jsonlines`](#scrapy-compatible-imports) quick start exports
+structured records that a separate ingestion job can process. Include a source URL in each item
+and retain the collection time in your downstream records if freshness matters.
+
+Configure responsible crawl rates and `ROBOTSTXT_OBEY` as appropriate; review site terms, privacy,
+and content rights before collecting or using data for AI. Access to a page does not itself grant
+permission to train on its contents. SpiderOxide is not a browser automation tool or a built-in
+RAG/LLM pipeline, and its Scrapy compatibility is still evolving.
 
 ## Quick start
 
