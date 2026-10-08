@@ -809,6 +809,20 @@ downloader owns its Reqwest proxy-client pool and applies HTTP `Proxy-Authorizat
 layer so credentials are not forwarded to direct target servers. SOCKS credentials are kept out of
 the normalized proxy URL, target request headers, error messages, and statistics.
 
+## Logging and mail
+
+Set `LOG_FORMATTER` to a `LogFormatter` subclass to control crawler, item, and error records.
+Formatter methods return a dictionary with `level`, `msg`, and `args`, or `None` to omit a
+record. `DEFAULT_DROPITEM_LOG_LEVEL` is `WARNING`; individual `DropItem` exceptions may set
+`log_level` to override it. The Python and Rust crawl engines use the same formatter.
+
+The deprecated `scrapy.mail.MailSender` import remains available with a
+`ScrapyDeprecationWarning`. SpiderOxide sends SMTP mail without a Twisted reactor using
+`spideroxide.mail.MailSender`; its `send()` method schedules delivery as an `asyncio.Task`
+instead of returning a Deferred. Await that task to observe failures and ensure delivery before
+the event loop closes. `MAIL_HOST`, `MAIL_FROM`, `MAIL_USER`, `MAIL_PASS`, `MAIL_PORT`, `MAIL_TLS`,
+and `MAIL_SSL` configure the sender. SMTP TLS validates server certificates and hostnames.
+
 ## Extensions
 
 Extensions are configured through the Scrapy-compatible `EXTENSIONS` setting. Values are numeric

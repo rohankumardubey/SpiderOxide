@@ -8,10 +8,12 @@ from functools import partial
 from typing import Any, TypeVar
 
 from .addons import AddonManager
+from .components import load_object
 from .downloader import Downloader
 from .downloadhandlers import DownloadHandlers
 from .engine import CrawlEngine, CrawlResult, create_engine
 from .extensions import ExtensionManager
+from .logformatter import LogFormatter
 from .services import ServiceManager
 from .settings import Settings
 from .signals import SignalManager
@@ -41,6 +43,7 @@ class Crawler:
         self.addons = AddonManager(self)
         self.signals = SignalManager()
         self.stats = StatsCollector()
+        self.logformatter: LogFormatter | None = None
         self.downloader = downloader
         self.spider: Spider | None = None
         self.engine: CrawlEngine | None = None
@@ -75,6 +78,8 @@ class Crawler:
         try:
             self.spider = self.spidercls.from_crawler(self, *args, **kwargs)
             self.addons.load_settings(self.settings)
+            formatter_class = load_object(self.settings["LOG_FORMATTER"])
+            self.logformatter = formatter_class.from_crawler(self)
             self.extensions = ExtensionManager.from_crawler(self)
             self.services = ServiceManager.from_crawler(self)
             self.settings.freeze()

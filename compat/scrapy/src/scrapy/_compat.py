@@ -15,9 +15,30 @@ from urllib.parse import urlsplit
 import spideroxide
 from spideroxide import signals as spideroxide_signals
 from spideroxide.api import DupeFilter, Scheduler, fingerprint_request
+from spideroxide.compatutils import (
+    ScrapyJSONEncoder,
+    add_http_if_no_scheme,
+    guess_scheme,
+    job_dir,
+    strip_url,
+    url_has_any_extension,
+    url_is_from_spider,
+)
 from spideroxide.components import build_from_crawler, load_object
+from spideroxide.curl import curl_to_request_kwargs
 from spideroxide.downloader import _response_type
-from spideroxide.exceptions import NotConfigured
+from spideroxide.exceptions import NotConfigured, ScrapyDeprecationWarning
+from spideroxide.logformatter import LogFormatter, LogFormatterResult, logformatter_adapter
+from spideroxide.logutils import (
+    DEFAULT_LOGGING,
+    LogCounterHandler,
+    SpiderLoggerAdapter,
+    StreamLogger,
+    TopLevelFormatter,
+    configure_logging,
+    get_scrapy_root_handler,
+    install_scrapy_root_handler,
+)
 from spideroxide.middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
@@ -34,10 +55,6 @@ from spideroxide.settings import (
 
 
 class ScrapyWarning(Warning):
-    pass
-
-
-class ScrapyDeprecationWarning(ScrapyWarning):
     pass
 
 
@@ -672,6 +689,10 @@ def install() -> None:
     _module("scrapy.signalmanager", {"SignalManager": SignalManager})
     _module("scrapy.signals", _public(spideroxide_signals))
     _module(
+        "scrapy.logformatter",
+        {"LogFormatter": LogFormatter, "LogFormatterResult": LogFormatterResult},
+    )
+    _module(
         "scrapy.exceptions",
         {
             "CannotResolveHostError": CannotResolveHostError,
@@ -923,7 +944,24 @@ def install() -> None:
             "project_data_dir": project_data_dir,
         },
     )
+    _module("scrapy.utils.job", {"job_dir": job_dir})
+    _module("scrapy.utils.curl", {"curl_to_request_kwargs": curl_to_request_kwargs})
     _module("scrapy.utils.iterators", {"csviter": csviter, "xmliter_lxml": xmliter_lxml})
+    _module(
+        "scrapy.utils.log",
+        {
+            "DEFAULT_LOGGING": DEFAULT_LOGGING,
+            "LogCounterHandler": LogCounterHandler,
+            "SpiderLoggerAdapter": SpiderLoggerAdapter,
+            "StreamLogger": StreamLogger,
+            "TopLevelFormatter": TopLevelFormatter,
+            "configure_logging": configure_logging,
+            "get_scrapy_root_handler": get_scrapy_root_handler,
+            "install_scrapy_root_handler": install_scrapy_root_handler,
+            "logformatter_adapter": logformatter_adapter,
+        },
+    )
+    _module("scrapy.utils.serialize", {"ScrapyJSONEncoder": ScrapyJSONEncoder})
     _module(
         "scrapy.utils.request",
         {
@@ -943,5 +981,15 @@ def install() -> None:
             "sitemap_urls_from_robots": sitemap_urls_from_robots,
         },
     )
-    _module("scrapy.utils.url", {"url_is_from_any_domain": url_is_from_any_domain})
+    _module(
+        "scrapy.utils.url",
+        {
+            "add_http_if_no_scheme": add_http_if_no_scheme,
+            "guess_scheme": guess_scheme,
+            "strip_url": strip_url,
+            "url_has_any_extension": url_has_any_extension,
+            "url_is_from_any_domain": url_is_from_any_domain,
+            "url_is_from_spider": url_is_from_spider,
+        },
+    )
     _module("scrapy.utils.trackref", {"live_refs": live_refs, "object_ref": object_ref})
