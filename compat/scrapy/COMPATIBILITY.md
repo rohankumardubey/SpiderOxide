@@ -28,6 +28,8 @@ reports in CI.
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
   project settings loading, object loading, and common encoding and URL helpers
+- LogFormatter customization and log-record helpers; SMTP mail with deprecation warnings;
+  cURL conversion, JSON serialization, job-directory, and URL helper APIs
 - One-time import of standard Scrapy 2.19 `JOBDIR` layouts into SpiderOxide's native persistence
   format, including queued requests, duplicate fingerprints, callbacks, priorities, and spider state
 
@@ -53,7 +55,7 @@ format migration.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Remaining logging, mail, resolver, TLS, and utility APIs — issues #46 and #47
+- Remaining logging, signal, Deferred, and miscellaneous utility APIs — issue #47
 - Telnet and remote-control surfaces — issue #48
 - Deferred and reactor integration — issue #50
 
@@ -65,6 +67,16 @@ behavior.
 Completed crawler and runner tasks resolve to SpiderOxide's `CrawlResult` instead of Scrapy's
 `None`. Code that only awaits crawl completion is unchanged; callers may additionally inspect
 items, statistics, and the close reason.
+
+`MailSender.send()` schedules delivery and returns an `asyncio.Task` instead of a Twisted
+`Deferred`. Await the task when the result matters; debug mode returns `None`. SMTP TLS uses
+verified certificates, unlike Scrapy's permissive legacy TLS context. Twisted reactor logging
+bridges and Deferred-specific helpers remain outside this surface (issue #50).
+
+Native SpiderOxide download exceptions retain the additional `DownloadError`/`SpiderOxideError`
+base classes, so their full method-resolution order does not yet match Scrapy's directly inherited
+exceptions. The Scrapy exception names, error meanings, and tested attributes are available;
+code depending on exact base-class identity must remain on upstream Scrapy (issue #47).
 
 SpiderOxide additionally exposes `scrapy.services.ServiceManager`, the `SERVICES` setting, and
 `Crawler.get_service()` for dependency-ordered crawler services with synchronous or asynchronous

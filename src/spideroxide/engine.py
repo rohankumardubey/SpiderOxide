@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import warnings
 from collections.abc import Awaitable, Callable
@@ -20,6 +21,7 @@ from .job import (
     serialize_spider_state,
 )
 from .jobinterop import migrate_scrapy_jobdir
+from .logformatter import LogFormatter, logformatter_adapter
 from .middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
@@ -52,6 +54,7 @@ class _OutputBatch:
 
 
 _START_DONE = object()
+logger = logging.getLogger(__name__)
 
 
 class CrawlEngine:
@@ -64,6 +67,8 @@ class CrawlEngine:
         self.settings: Settings = crawler.settings  # type: ignore[attr-defined]
         self.signals = crawler.signals  # type: ignore[attr-defined]
         self.stats: StatsCollector = crawler.stats  # type: ignore[attr-defined]
+        formatter = crawler.logformatter  # type: ignore[attr-defined]
+        self.logformatter: LogFormatter = formatter if formatter is not None else LogFormatter()
         self.scheduler = EngineScheduler(SchedulerQueueConfig.from_settings(self.settings))
         self.downloader_middleware = DownloaderMiddlewareManager(
             crawler,
@@ -310,11 +315,13 @@ class CrawlEngine:
         except IgnoreRequest:
             return _OutputBatch([], None)
         except Exception as exception:
+            self._log_action("download_error", exception, request, self.spider)
             return _OutputBatch(await self._run_errback(request, exception), None)
 
         if isinstance(downloaded, Request):
             return _OutputBatch([downloaded], None)
         response = downloaded
+        self._log_action("crawled", request, response, self.spider)
         await self.signals.send(
             signals.response_received,
             response=response,
@@ -322,6 +329,16 @@ class CrawlEngine:
             spider=self.spider,
         )
         return _OutputBatch(await self._run_callback(request, response), response)
+
+    def _log_action(self, action: str, *args: object, exception: Exception | None = None) -> None:
+        result = getattr(self.logformatter, action)(*args)
+        if result is not None:
+            exc_info = (
+                None if exception is None else (type(exception), exception, exception.__traceback__)
+            )
+            logger.log(
+                *logformatter_adapter(result), exc_info=exc_info, extra={"spider": self.spider}
+            )
 
     async def _download(self, request: Request) -> Request | Response:
         return await self.downloader_middleware.download(request, self.downloader.fetch)
@@ -522,6 +539,10 @@ class CrawlEngine:
         exception_name = f"{exception_type.__module__}.{exception_type.__qualname__}"
         self.stats.inc_value("spider_exceptions/count")
         self.stats.inc_value(f"spider_exceptions/{exception_name}")
+        if request is not None:
+            self._log_action(
+                "spider_error", exception, request, response, self.spider, exception=exception
+            )
         await self.signals.send(signals.spider_error, **kwargs)
         return []
 
@@ -540,6 +561,7 @@ class CrawlEngine:
             try:
                 item = await self.item_pipelines.process_item(output, self.spider)
             except DropItem as exception:
+                self._log_action("dropped", output, exception, response, self.spider)
                 await self.signals.send(
                     signals.item_dropped,
                     item=output,
@@ -549,7 +571,9 @@ class CrawlEngine:
                 )
                 continue
             except Exception as exception:
-                self.spider.logger.exception("Error processing item")
+                self._log_action(
+                    "item_error", output, exception, response, self.spider, exception=exception
+                )
                 await self.signals.send(
                     signals.item_error,
                     item=output,
@@ -559,6 +583,7 @@ class CrawlEngine:
                 )
                 continue
             self.items.append(item)
+            self._log_action("scraped", item, response, self.spider)
             await self.signals.send(
                 signals.item_scraped,
                 item=item,

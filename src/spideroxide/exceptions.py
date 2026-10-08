@@ -2,6 +2,10 @@ class SpiderOxideError(Exception):
     """Base exception for SpiderOxide."""
 
 
+class ScrapyDeprecationWarning(Warning):
+    """Warning category for Scrapy-compatible deprecated APIs."""
+
+
 class NotConfigured(SpiderOxideError):
     """Raised when a component is intentionally disabled by configuration."""
 
@@ -12,6 +16,10 @@ class IgnoreRequest(SpiderOxideError):
 
 class DropItem(SpiderOxideError):
     """Raised by an item pipeline to discard an item."""
+
+    def __init__(self, message: str, log_level: str | None = None) -> None:
+        super().__init__(message)
+        self.log_level = log_level
 
 
 class DownloadError(SpiderOxideError):
@@ -55,7 +63,7 @@ class CloseSpider(SpiderOxideError):
 
     def __init__(self, reason: str = "cancelled") -> None:
         self.reason = reason
-        super().__init__(reason)
+        super().__init__()
 
 
 class DontCloseSpider(SpiderOxideError):

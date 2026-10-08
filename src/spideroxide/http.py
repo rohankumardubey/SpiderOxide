@@ -171,6 +171,7 @@ def _curl_request_kwargs(
         "--max-time",
     }
     ignored_flags = {
+        "-#",
         "-s",
         "--silent",
         "-S",
@@ -183,6 +184,7 @@ def _curl_request_kwargs(
         "-i",
         "--include",
     }
+    unknown_options: list[str] = []
     index = 1
     while index < len(tokens):
         token = tokens[index]
@@ -227,6 +229,7 @@ def _curl_request_kwargs(
                 else:
                     headers.append((name, header_value))
             elif token in {"-d", "--data", "--data-raw", "--data-ascii", "--data-binary"}:
+                value = value.removeprefix("$")
                 body = value if body is None else f"{body}&{value}"
             elif token in {"-b", "--cookie"}:
                 _parse_cookie_header(value, cookies)
@@ -245,9 +248,12 @@ def _curl_request_kwargs(
         elif token.startswith("-"):
             if not ignore_unknown_options:
                 raise ValueError(f"unsupported curl option: {token}")
+            unknown_options.append(token)
         elif url is None:
             url = token
         index += 1
+    if unknown_options:
+        warnings.warn(f"Unrecognized options: {', '.join(unknown_options)}", stacklevel=2)
     if url is None:
         raise ValueError("curl command does not contain a URL")
     if url.startswith("//"):
@@ -257,7 +263,7 @@ def _curl_request_kwargs(
     values: dict[str, object] = {"url": url}
     if method is not None:
         values["method"] = method
-    elif body is not None:
+    elif body:
         values["method"] = "POST"
     if headers:
         values["headers"] = headers
