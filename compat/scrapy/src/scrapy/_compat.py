@@ -10,7 +10,9 @@ from importlib.machinery import ModuleSpec
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlparse, urlsplit, urlunparse
+
+from w3lib.http import headers_dict_to_raw
 
 import spideroxide
 from spideroxide import signals as spideroxide_signals
@@ -315,12 +317,17 @@ def request_from_dict(d: Mapping[str, object], *, spider: object | None = None) 
     data = dict(d)
     class_path = data.pop("_class", None)
     request_type = spideroxide.Request if class_path is None else load_object(str(class_path))
+    if not isinstance(request_type, type) or not issubclass(request_type, spideroxide.Request):
+        raise TypeError(f"request class must be a Request subclass, got {request_type!r}")
+    data = {name: value for name, value in data.items() if name in request_type.attributes}
     for field in ("callback", "errback"):
         value = data.get(field)
-        if isinstance(value, str):
-            if spider is None:
-                raise ValueError(f"request {field} requires a spider instance")
-            data[field] = getattr(spider, value)
+        if value and spider is not None:
+            name = str(value)
+            try:
+                data[field] = getattr(spider, name)
+            except AttributeError:
+                raise ValueError(f"Method {name!r} not found in: {spider}") from None
     return request_type(**data)
 
 
@@ -361,9 +368,19 @@ def request_to_curl(request: object) -> str:
     return " ".join(curl_command.split())
 
 
+def request_httprepr(request: spideroxide.Request) -> bytes:
+    parsed = urlparse(request.url)
+    path = urlunparse(("", "", parsed.path or "/", parsed.params, parsed.query, ""))
+    result = to_bytes(request.method) + b" " + to_bytes(path) + b" HTTP/1.1\r\n"
+    result += b"Host: " + to_bytes(parsed.hostname or "") + b"\r\n"
+    if request.headers:
+        result += headers_dict_to_raw(request.headers.to_scrapy_dict()) + b"\r\n"
+    return result + b"\r\n" + request.body
+
+
 def referer_str(request: object) -> str | None:
     value = request.headers.get("Referer")
-    return None if value is None else value.decode("latin-1")
+    return None if value is None else value.decode("utf-8", errors="replace")
 
 
 def url_is_from_any_domain(url: str, domains: Iterable[str]) -> bool:
@@ -371,13 +388,59 @@ def url_is_from_any_domain(url: str, domains: Iterable[str]) -> bool:
     return any(host == domain.lower() or host.endswith(f".{domain.lower()}") for domain in domains)
 
 
-def response_status_message(status: int) -> str:
-    from http import HTTPStatus
+# Scrapy 2.19 uses Twisted's status phrases, which differ from stdlib HTTPStatus.
+_STATUS_PHRASES = {
+    100: "Continue",
+    101: "Switching Protocols",
+    200: "OK",
+    201: "Created",
+    202: "Accepted",
+    203: "Non-Authoritative Information",
+    204: "No Content",
+    205: "Reset Content.",
+    206: "Partial Content",
+    207: "Multi-Status",
+    300: "Multiple Choices",
+    301: "Moved Permanently",
+    302: "Found",
+    303: "See Other",
+    304: "Not Modified",
+    305: "Use Proxy",
+    307: "Temporary Redirect",
+    308: "Permanent Redirect",
+    400: "Bad Request",
+    401: "Unauthorized",
+    402: "Payment Required",
+    403: "Forbidden",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    406: "Not Acceptable",
+    407: "Proxy Authentication Required",
+    408: "Request Time-out",
+    409: "Conflict",
+    410: "Gone",
+    411: "Length Required",
+    412: "Precondition Failed",
+    413: "Request Entity Too Large",
+    414: "Request-URI Too Long",
+    415: "Unsupported Media Type",
+    416: "Requested Range not satisfiable",
+    417: "Expectation Failed",
+    418: "I'm a teapot",
+    500: "Internal Server Error",
+    501: "Not Implemented",
+    502: "Bad Gateway",
+    503: "Service Unavailable",
+    504: "Gateway Time-out",
+    505: "HTTP Version not supported",
+    507: "Insufficient Storage Space",
+    510: "Not Extended",
+}
 
-    try:
-        return f"{status} {HTTPStatus(status).phrase}"
-    except ValueError:
-        return str(status)
+
+def response_status_message(status: bytes | float | str | int) -> str:
+    code = int(status)
+    return f"{code} {_STATUS_PHRASES.get(code, 'Unknown Status')}"
 
 
 def iterate_spider_output(result: object) -> object:
@@ -976,6 +1039,7 @@ def install() -> None:
             "fingerprint": fingerprint,
             "referer_str": referer_str,
             "request_from_dict": request_from_dict,
+            "request_httprepr": request_httprepr,
             "request_to_curl": request_to_curl,
         },
     )

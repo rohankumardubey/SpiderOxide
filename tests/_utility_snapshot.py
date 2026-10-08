@@ -34,6 +34,8 @@ from scrapy.utils.log import (
     get_scrapy_root_handler,
     logformatter_adapter,
 )
+from scrapy.utils.request import referer_str, request_from_dict, request_httprepr
+from scrapy.utils.response import response_status_message
 from scrapy.utils.serialize import ScrapyJSONEncoder
 from scrapy.utils.trackref import (
     format_live_refs,
@@ -138,6 +140,31 @@ def main() -> None:
         "drop_args": dropped.args,
         "drop_level": dropped.log_level,
         "stop_fail": StopDownload(fail=False).fail,
+    }
+    sample = Request(
+        "https://example.test/p;a?x=1#frag",
+        method="POST",
+        headers=[("X-Test", ["one", "two"])],
+        body=b"line 1\nline 2",
+        callback=spider.parse,
+    )
+    serialized = sample.to_dict(spider=spider)
+    serialized["extra_field"] = "ignored"
+    restored = request_from_dict(serialized, spider=spider)
+    try:
+        request_from_dict({"url": sample.url, "callback": "missing"}, spider=spider)
+    except Exception as error:
+        missing_callback_error = type(error).__name__
+    else:
+        raise AssertionError("a missing callback should raise an error")
+    output["request_helpers"] = {
+        "http": request_httprepr(sample).decode("latin-1"),
+        "callback": restored.callback.__name__,
+        "url": restored.url,
+        "missing_callback_error": missing_callback_error,
+        "referer": referer_str(Request(sample.url, headers={"Referer": b"\xffpath"})),
+        "status": [response_status_message(code) for code in range(100, 600)],
+        "status_input": [response_status_message(code) for code in (b"404", " 404 ", 404.5)],
     }
     output["url"] = {
         "http": [

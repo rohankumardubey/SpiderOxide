@@ -42,4 +42,7 @@ if __name__ == "__main__":
         upstream = snapshot(shim=False)
         for key, value in upstream.items():
             assert candidate[key] == value, (key, value, candidate[key])
-    print("Utility parity passed: formatter records, exceptions, curl, URL, JSON and mail APIs")
+    print(
+        "Utility parity passed: formatter records, exceptions, request/response helpers, "
+        "trackref, curl, URL, JSON and mail APIs"
+    )
