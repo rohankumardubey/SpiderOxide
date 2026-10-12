@@ -19,6 +19,7 @@ from . import signals
 from .backend import BackendUnavailableError
 from .cookies import _request_cookie_header
 from .exceptions import (
+    _DOWNLOAD_ERRORS,
     CannotResolveHostError,
     DownloadCancelledError,
     DownloadConnectionRefusedError,
@@ -299,7 +300,7 @@ def _is_data_loss(error: Exception) -> bool:
     )
 
 
-def _httpx_download_error(request: Request, timeout: float, error: Exception) -> DownloadError:
+def _httpx_download_error(request: Request, timeout: float, error: Exception) -> Exception:
     if isinstance(error, httpx.TimeoutException):
         return DownloadTimeoutError(f"Getting {request.url} timed out after {timeout} seconds.")
     if isinstance(error, httpx.UnsupportedProtocol):
@@ -545,7 +546,7 @@ class HttpxDownloader:
                     if stop.fail:
                         raise stop
                 return response
-        except DownloadError:
+        except _DOWNLOAD_ERRORS:
             raise
         except socket.gaierror as error:
             raise CannotResolveHostError(str(error)) from error

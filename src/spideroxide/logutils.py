@@ -1,14 +1,31 @@
 from __future__ import annotations
 
 import logging
+import platform
+import pprint
+import re
 import sys
 import warnings
 from collections.abc import MutableMapping
+from importlib.metadata import version
 from logging.config import dictConfig
 from typing import Any
 
+import lxml.etree
+
 from .exceptions import ScrapyDeprecationWarning
 from .settings import Settings
+
+logger = logging.getLogger(__name__)
+_DEFAULT_LOG_VERSIONS = [
+    "lxml",
+    "libxml2",
+    "cssselect",
+    "parsel",
+    "w3lib",
+    "Python",
+    "Platform",
+]
 
 DEFAULT_LOGGING: dict[str, object] = {
     "version": 1,
@@ -24,7 +41,7 @@ DEFAULT_LOGGING: dict[str, object] = {
         "twisted": {"level": "ERROR"},
     },
 }
-_root_handler: logging.Handler | None = None
+_scrapy_root_handler: logging.Handler | None = None
 
 
 class TopLevelFormatter(logging.Filter):
@@ -74,42 +91,127 @@ class SpiderLoggerAdapter(logging.LoggerAdapter):
         return msg, kwargs
 
 
-def _uninstall_root_handler() -> None:
-    global _root_handler
-    if _root_handler is None:
+def _uninstall_scrapy_root_handler() -> None:
+    global _scrapy_root_handler
+    if _scrapy_root_handler is None:
         return
-    if _root_handler in logging.root.handlers:
-        logging.root.removeHandler(_root_handler)
-    _root_handler.close()
-    _root_handler = None
+    if _scrapy_root_handler in logging.root.handlers:
+        logging.root.removeHandler(_scrapy_root_handler)
+    _scrapy_root_handler.close()
+    _scrapy_root_handler = None
+
+
+def _uninstall_root_handler() -> None:
+    _uninstall_scrapy_root_handler()
+
+
+def _tty_supports_color() -> bool:
+    if sys.platform != "win32":
+        return True
+    build = re.match(r"(\d+)\.(\d+)\.(\d+)", platform.version())
+    if build is None or tuple(map(int, build.groups())) < (10, 0, 14393):
+        return True
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    return bool(kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7))
+
+
+def _get_formatter(handler: logging.Handler, settings: Settings) -> logging.Formatter:
+    fmt = settings.get("LOG_FORMAT")
+    datefmt = settings.get("LOG_DATEFORMAT")
+    if (
+        isinstance(handler, logging.StreamHandler)
+        and not isinstance(handler, logging.FileHandler)
+        and settings.getbool("LOG_COLOR")
+        and handler.stream.isatty()
+        and _tty_supports_color()
+    ):
+        try:
+            from colorlog import ColoredFormatter
+        except ImportError:
+            pass
+        else:
+            return ColoredFormatter(fmt=f"%(log_color)s{fmt}", datefmt=datefmt)
+    return logging.Formatter(fmt=fmt, datefmt=datefmt)
+
+
+def _get_handler(settings: Settings) -> logging.Handler:
+    filename = settings.get("LOG_FILE")
+    handler: logging.Handler
+    if filename:
+        handler = logging.FileHandler(
+            filename,
+            mode="a" if settings.getbool("LOG_FILE_APPEND") else "w",
+            encoding=settings.get("LOG_ENCODING"),
+        )
+    elif settings.getbool("LOG_ENABLED"):
+        handler = logging.StreamHandler()
+    else:
+        handler = logging.NullHandler()
+    handler.setFormatter(_get_formatter(handler, settings))
+    handler.setLevel(settings.get("LOG_LEVEL"))
+    if settings.getbool("LOG_SHORT_NAMES"):
+        handler.addFilter(TopLevelFormatter(["scrapy"]))
+    return handler
 
 
 def install_scrapy_root_handler(settings: Settings) -> None:
-    global _root_handler
-    _uninstall_root_handler()
+    global _scrapy_root_handler
+    _uninstall_scrapy_root_handler()
     logging.root.setLevel(logging.NOTSET)
-    filename = settings.get("LOG_FILE")
-    if filename:
-        _root_handler = logging.FileHandler(
-            filename,
-            mode="a" if settings.getbool("LOG_FILE_APPEND") else "w",
-            encoding=str(settings.get("LOG_ENCODING")),
-        )
-    elif settings.getbool("LOG_ENABLED"):
-        _root_handler = logging.StreamHandler()
-    else:
-        _root_handler = logging.NullHandler()
-    _root_handler.setFormatter(
-        logging.Formatter(fmt=settings.get("LOG_FORMAT"), datefmt=settings.get("LOG_DATEFORMAT"))
-    )
-    _root_handler.setLevel(settings.get("LOG_LEVEL"))
-    if settings.getbool("LOG_SHORT_NAMES"):
-        _root_handler.addFilter(TopLevelFormatter(["scrapy"]))
-    logging.root.addHandler(_root_handler)
+    _scrapy_root_handler = _get_handler(settings)
+    logging.root.addHandler(_scrapy_root_handler)
 
 
 def get_scrapy_root_handler() -> logging.Handler | None:
-    return _root_handler
+    return _scrapy_root_handler
+
+
+def _software_version(item: str) -> str:
+    name = item.lower()
+    scrapy = sys.modules.get("scrapy")
+    if (
+        name == "scrapy"
+        and scrapy is not None
+        and getattr(scrapy, "spideroxide_compat_version", None)
+    ):
+        return scrapy.__version__
+    if name == "libxml2":
+        return ".".join(map(str, lxml.etree.LIBXML_VERSION))
+    if name == "platform":
+        return platform.platform()
+    if name == "python":
+        return sys.version.replace("\n", "- ")
+    if name == "pyopenssl":
+        import OpenSSL.SSL
+        import OpenSSL.version
+
+        openssl = OpenSSL.SSL.SSLeay_version(OpenSSL.SSL.SSLEAY_VERSION)
+        return f"{OpenSSL.version.__version__} ({openssl.decode('ascii', errors='replace')})"
+    return version(item)
+
+
+def log_scrapy_info(settings: Settings) -> None:
+    scrapy = sys.modules.get("scrapy")
+    if scrapy is not None and getattr(scrapy, "spideroxide_compat_version", None):
+        info_logger = logging.getLogger("scrapy.utils.log")
+        name = "Scrapy"
+        current_version = scrapy.__version__
+    else:
+        info_logger = logger
+        name = "SpiderOxide"
+        current_version = version("spideroxide")
+    info_logger.info(
+        f"{name} %(version)s started (bot: %(bot)s)",
+        {"version": current_version, "bot": settings["BOT_NAME"]},
+    )
+    software = settings.getlist("LOG_VERSIONS", _DEFAULT_LOG_VERSIONS)
+    if software:
+        versions = pprint.pformat(
+            {item: _software_version(item) for item in software}, sort_dicts=False
+        )
+        info_logger.info(f"Versions:\n{versions}")
 
 
 def configure_logging(

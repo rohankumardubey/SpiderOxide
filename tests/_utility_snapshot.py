@@ -11,6 +11,7 @@ from contextlib import redirect_stdout
 from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import ModuleType
 
 ROOT = Path(__file__).resolve().parents[1]
 if os.environ.get("SPIDEROXIDE_SHIM") == "1":
@@ -37,6 +38,7 @@ from scrapy.utils.log import (
 from scrapy.utils.request import referer_str, request_from_dict, request_httprepr
 from scrapy.utils.response import response_status_message
 from scrapy.utils.serialize import ScrapyJSONEncoder
+from scrapy.utils.spider import DefaultSpider, iter_spider_classes, spidercls_for_request
 from scrapy.utils.trackref import (
     format_live_refs,
     get_oldest,
@@ -166,6 +168,68 @@ def main() -> None:
         "status": [response_status_message(code) for code in range(100, 600)],
         "status_input": [response_status_message(code) for code in (b"404", " 404 ", 404.5)],
     }
+    module = ModuleType("fixture_spiders")
+    local_spider = type("LocalSpider", (Spider,), {"__module__": module.__name__, "name": "local"})
+    unnamed_spider = type("UnnamedSpider", (Spider,), {"__module__": module.__name__})
+    imported_spider = type(
+        "ImportedSpider", (Spider,), {"__module__": "other_spiders", "name": "imported"}
+    )
+    module.LocalSpider = local_spider
+    module.UnnamedSpider = unnamed_spider
+    module.ImportedSpider = imported_spider
+
+    class Loader:
+        def find_by_request(self, request: Request) -> list[str]:
+            return request.meta["matches"]
+
+        def load(self, name: str) -> type[Spider]:
+            assert name == "local"
+            return local_spider
+
+    loader = Loader()
+    spider_logger = logging.getLogger("scrapy.utils.spider")
+    spider_logs: list[tuple[str, str, str | None]] = []
+
+    class _SpiderLogCapture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            spider_logs.append((record.name, record.msg, record.args.get("snames")))
+
+    spider_handler = _SpiderLogCapture()
+    spider_logger.addHandler(spider_handler)
+    output["spider_helpers"] = {
+        "classes": [cls.__name__ for cls in iter_spider_classes(module)],
+        "default_name": DefaultSpider.name,
+        "unique": spidercls_for_request(
+            loader, Request("https://example.test", meta={"matches": ["local"]})
+        )
+        is local_spider,
+        "multiple": spidercls_for_request(
+            loader,
+            Request("https://example.test", meta={"matches": ["first", "second"]}),
+            default_spidercls=DefaultSpider,
+        )
+        is DefaultSpider,
+        "none": spidercls_for_request(loader, Request("https://example.test", meta={"matches": []}))
+        is None,
+        "fallback": spidercls_for_request(
+            loader,
+            Request("https://example.test", meta={"matches": []}),
+            default_spidercls=DefaultSpider,
+        )
+        is DefaultSpider,
+    }
+    try:
+        spidercls_for_request(
+            loader, Request("https://example.test", meta={"matches": []}), log_none=True
+        )
+        spidercls_for_request(
+            loader,
+            Request("https://example.test", meta={"matches": ["first", "second"]}),
+            log_multiple=True,
+        )
+    finally:
+        spider_logger.removeHandler(spider_handler)
+    output["spider_helpers"]["logs"] = spider_logs
     output["url"] = {
         "http": [
             add_http_if_no_scheme(value)

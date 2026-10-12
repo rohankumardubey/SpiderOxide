@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import os
 import sys
+import warnings
 import xmlrpc.client
 from collections.abc import AsyncIterable, Iterable, Mapping
 from configparser import ConfigParser
@@ -17,6 +19,37 @@ from w3lib.http import headers_dict_to_raw
 import spideroxide
 from spideroxide import signals as spideroxide_signals
 from spideroxide.api import DupeFilter, Scheduler, fingerprint_request
+from spideroxide.asyncutils import (
+    AsyncioLoopingCall,
+    CallLaterResult,
+    as_async_generator,
+    call_later,
+    collect_asyncgen,
+    create_looping_call,
+    is_asyncio_available,
+    run_in_thread,
+    sleep,
+)
+from spideroxide.compathelpers import (
+    MutableAsyncChain,
+    MutableChain,
+    binary_is_text,
+    garbage_collect,
+    get_func_args,
+    get_func_args_dict,
+    get_spec,
+    is_generator_with_return_value,
+    is_listlike,
+    memoizemethod_noargs,
+    re_rsearch,
+    rel_has_nofollow,
+    set_environ,
+    unique,
+    walk_callable,
+    walk_modules,
+    walk_modules_iter,
+    warn_on_generator_with_return_value,
+)
 from spideroxide.compatutils import (
     ScrapyJSONEncoder,
     add_http_if_no_scheme,
@@ -28,8 +61,22 @@ from spideroxide.compatutils import (
 )
 from spideroxide.components import build_from_crawler, load_object
 from spideroxide.curl import curl_to_request_kwargs
+from spideroxide.deprecateutils import (
+    DEPRECATION_RULES,
+    argument_is_required,
+    attribute,
+    create_deprecated_class,
+    method_is_overridden,
+    update_classpath,
+    warn_on_deprecated_spider_attribute,
+)
 from spideroxide.downloader import _response_type
-from spideroxide.exceptions import NotConfigured, ScrapyDeprecationWarning
+from spideroxide.exceptions import (
+    ContractFail,
+    NotConfigured,
+    ScrapyDeprecationWarning,
+    UsageError,
+)
 from spideroxide.logformatter import LogFormatter, LogFormatterResult, logformatter_adapter
 from spideroxide.logutils import (
     DEFAULT_LOGGING,
@@ -40,11 +87,18 @@ from spideroxide.logutils import (
     configure_logging,
     get_scrapy_root_handler,
     install_scrapy_root_handler,
+    log_scrapy_info,
 )
 from spideroxide.middleware import (
     DownloaderMiddlewareManager,
     ItemPipelineManager,
     SpiderMiddlewareManager,
+)
+from spideroxide.responseutils import (
+    get_base_url,
+    get_meta_refresh,
+    open_in_browser,
+    response_from_dict,
 )
 from spideroxide.settings import (
     DEFAULT_SETTINGS,
@@ -54,19 +108,12 @@ from spideroxide.settings import (
     SettingsAttribute,
     get_settings_priority,
 )
+from spideroxide.spiderloader import iter_spider_classes
+
+logger = logging.getLogger("scrapy.utils.spider")
 
 
 class ScrapyWarning(Warning):
-    pass
-
-
-class UsageError(Exception):
-    def __init__(self, *args: object, print_help: bool = True) -> None:
-        self.print_help = print_help
-        super().__init__(*args)
-
-
-class ContractFail(AssertionError):
     pass
 
 
@@ -165,46 +212,46 @@ class MarshalLifoDiskQueue(_QueueMarker):
     pass
 
 
-def global_object_name(value: object) -> str:
-    return f"{value.__module__}.{value.__qualname__}"  # type: ignore[attr-defined]
+def global_object_name(obj: object) -> str:
+    return f"{obj.__module__}.{obj.__qualname__}"  # type: ignore[attr-defined]
 
 
 def to_bytes(
-    value: str | bytes,
+    text: str | bytes,
     encoding: str | None = None,
     errors: str = "strict",
 ) -> bytes:
-    if isinstance(value, bytes):
-        return value
-    if not isinstance(value, str):
-        raise TypeError(f"to_bytes must receive str or bytes, got {type(value).__name__}")
-    return value.encode(encoding or "utf-8", errors)
+    if isinstance(text, bytes):
+        return text
+    if not isinstance(text, str):
+        raise TypeError(f"to_bytes must receive a str or bytes object, got {type(text).__name__}")
+    return text.encode(encoding or "utf-8", errors)
 
 
 def to_unicode(
-    value: str | bytes,
+    text: str | bytes,
     encoding: str | None = None,
     errors: str = "strict",
 ) -> str:
-    if isinstance(value, str):
-        return value
-    if not isinstance(value, bytes):
-        raise TypeError(f"to_unicode must receive str or bytes, got {type(value).__name__}")
-    return value.decode(encoding or "utf-8", errors)
+    if isinstance(text, str):
+        return text
+    if not isinstance(text, bytes):
+        raise TypeError(f"to_unicode must receive a bytes or str object, got {type(text).__name__}")
+    return text.decode(encoding or "utf-8", errors)
 
 
-def without_none_values(mapping: Mapping[Any, Any]) -> dict[Any, Any]:
-    return {key: value for key, value in mapping.items() if value is not None}
+def without_none_values(iterable: Mapping[Any, Any] | Iterable[Any]) -> object:
+    if isinstance(iterable, Mapping):
+        return {key: value for key, value in iterable.items() if value is not None}
+    return type(iterable)(value for value in iterable if value is not None)
 
 
-def arg_to_iter(value: object) -> Iterable[object]:
-    if value is None:
+def arg_to_iter(arg: object) -> Iterable[object]:
+    if arg is None:
         return ()
-    if isinstance(value, (str, bytes, Mapping)):
-        return (value,)
-    if isinstance(value, Iterable):
-        return value
-    return (value,)
+    if not isinstance(arg, (str, bytes, Mapping)) and hasattr(arg, "__iter__"):
+        return arg
+    return [arg]
 
 
 def closest_scrapy_cfg(path: str | os.PathLike[str] = ".") -> str:
@@ -223,8 +270,11 @@ def inside_project() -> bool:
     if module_name:
         try:
             __import__(module_name)
-        except ImportError:
-            pass
+        except ImportError as error:
+            warnings.warn(
+                f"Cannot import scrapy settings module {module_name}: {error}",
+                stacklevel=2,
+            )
         else:
             return True
     return bool(closest_scrapy_cfg())
@@ -256,17 +306,19 @@ def find_projects(
 
 
 def project_data_dir(project: str = "default") -> str:
+    if not inside_project():
+        raise NotConfigured("Not inside a project")
     config_path = closest_scrapy_cfg()
     if not config_path:
-        raise NotConfigured("Not inside a project")
+        raise NotConfigured("Unable to find scrapy.cfg file to infer project data dir")
     config = ConfigParser()
     config.read(config_path)
     if config.has_option("datadir", project):
         directory = Path(config.get("datadir", project))
     else:
-        directory = Path(config_path).parent / ".scrapy"
+        directory = (Path(config_path).parent / ".scrapy").resolve()
     directory.mkdir(parents=True, exist_ok=True)
-    return str(directory.resolve())
+    return str(directory)
 
 
 def data_path(path: str | os.PathLike[str], createdir: bool = False) -> str:
@@ -446,13 +498,31 @@ def response_status_message(status: bytes | float | str | int) -> str:
 def iterate_spider_output(result: object) -> object:
     if inspect.isawaitable(result) or isinstance(result, AsyncIterable):
         return result
-    if result is None:
-        return ()
-    if isinstance(result, (spideroxide.Request, Mapping)):
-        return (result,)
-    if isinstance(result, Iterable) and not isinstance(result, (str, bytes)):
-        return result
-    return (result,)
+    return arg_to_iter(result)
+
+
+def spidercls_for_request(
+    spider_loader: spideroxide.SpiderLoader,
+    request: spideroxide.Request,
+    default_spidercls: type[spideroxide.Spider] | None = None,
+    log_none: bool = False,
+    log_multiple: bool = False,
+) -> type[spideroxide.Spider] | None:
+    names = spider_loader.find_by_request(request)
+    if len(names) == 1:
+        return spider_loader.load(names[0])
+    if len(names) > 1 and log_multiple:
+        logger.error(
+            "More than one spider can handle: %(request)s - %(snames)s",
+            {"request": request, "snames": ", ".join(names)},
+        )
+    if not names and log_none:
+        logger.error("Unable to find spider that handles: %(request)s", {"request": request})
+    return default_spidercls
+
+
+class DefaultSpider(spideroxide.Spider):
+    name = "default"
 
 
 class ResponseTypes:
@@ -987,19 +1057,68 @@ def install() -> None:
 
     _module("scrapy.utils", {}, package=True)
     _module(
+        "scrapy.utils.asyncgen",
+        {
+            "as_async_generator": as_async_generator,
+            "collect_asyncgen": collect_asyncgen,
+        },
+    )
+    _module(
+        "scrapy.utils.asyncio",
+        {
+            "AsyncioLoopingCall": AsyncioLoopingCall,
+            "CallLaterResult": CallLaterResult,
+            "call_later": call_later,
+            "create_looping_call": create_looping_call,
+            "is_asyncio_available": is_asyncio_available,
+            "run_in_thread": run_in_thread,
+            "sleep": sleep,
+        },
+    )
+    _module(
         "scrapy.utils.misc",
         {
             "arg_to_iter": arg_to_iter,
             "build_from_crawler": build_from_crawler,
+            "is_generator_with_return_value": is_generator_with_return_value,
             "load_object": load_object,
+            "rel_has_nofollow": rel_has_nofollow,
+            "set_environ": set_environ,
+            "walk_callable": walk_callable,
+            "walk_modules": walk_modules,
+            "walk_modules_iter": walk_modules_iter,
+            "warn_on_generator_with_return_value": warn_on_generator_with_return_value,
+        },
+    )
+    _module(
+        "scrapy.utils.deprecate",
+        {
+            "DEPRECATION_RULES": DEPRECATION_RULES,
+            "argument_is_required": argument_is_required,
+            "attribute": attribute,
+            "create_deprecated_class": create_deprecated_class,
+            "method_is_overridden": method_is_overridden,
+            "update_classpath": update_classpath,
+            "warn_on_deprecated_spider_attribute": warn_on_deprecated_spider_attribute,
         },
     )
     _module(
         "scrapy.utils.python",
         {
+            "MutableAsyncChain": MutableAsyncChain,
+            "MutableChain": MutableChain,
+            "binary_is_text": binary_is_text,
+            "garbage_collect": garbage_collect,
+            "get_func_args": get_func_args,
+            "get_func_args_dict": get_func_args_dict,
+            "get_spec": get_spec,
             "global_object_name": global_object_name,
+            "is_listlike": is_listlike,
+            "memoizemethod_noargs": memoizemethod_noargs,
+            "re_rsearch": re_rsearch,
             "to_bytes": to_bytes,
             "to_unicode": to_unicode,
+            "unique": unique,
             "without_none_values": without_none_values,
         },
     )
@@ -1028,6 +1147,7 @@ def install() -> None:
             "configure_logging": configure_logging,
             "get_scrapy_root_handler": get_scrapy_root_handler,
             "install_scrapy_root_handler": install_scrapy_root_handler,
+            "log_scrapy_info": log_scrapy_info,
             "logformatter_adapter": logformatter_adapter,
         },
     )
@@ -1043,8 +1163,25 @@ def install() -> None:
             "request_to_curl": request_to_curl,
         },
     )
-    _module("scrapy.utils.response", {"response_status_message": response_status_message})
-    _module("scrapy.utils.spider", {"iterate_spider_output": iterate_spider_output})
+    _module(
+        "scrapy.utils.response",
+        {
+            "get_base_url": get_base_url,
+            "get_meta_refresh": get_meta_refresh,
+            "open_in_browser": open_in_browser,
+            "response_from_dict": response_from_dict,
+            "response_status_message": response_status_message,
+        },
+    )
+    _module(
+        "scrapy.utils.spider",
+        {
+            "DefaultSpider": DefaultSpider,
+            "iter_spider_classes": iter_spider_classes,
+            "iterate_spider_output": iterate_spider_output,
+            "spidercls_for_request": spidercls_for_request,
+        },
+    )
     _module(
         "scrapy.utils.sitemap",
         {

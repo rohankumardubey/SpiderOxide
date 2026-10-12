@@ -30,7 +30,7 @@ class LogFormatterResult(TypedDict):
 
 def _referer(request: Request) -> str | None:
     value = request.headers.get("Referer")
-    return None if value is None else value.decode("latin-1")
+    return None if value is None else value.decode("utf-8", errors="replace")
 
 
 class LogFormatter:

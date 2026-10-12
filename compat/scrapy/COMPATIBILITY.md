@@ -27,11 +27,15 @@ reports in CI.
   policies; and operational extensions implemented by SpiderOxide
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
-  project settings loading, object loading, raw HTTP request formatting, response status messages,
-  and common encoding and URL helpers
-- Asyncio signal waiting, bulk disconnect, and asynchronous signal dispatch
+  response dictionary round-tripping, spider discovery and selection, project settings loading,
+  object loading, raw HTTP request formatting, response status messages, base URL and meta-refresh
+  parsing, browser-file generation, and common encoding and URL helpers
+- Scrapy's public exception inheritance and attributes; deprecated exception aliases and warnings
+- Sender-aware, weak-receiver, and asynchronous signal dispatch; asyncio signal waiting and bulk
+  disconnect; asyncio-native task scheduling, generator, looping, sleep, and thread helpers
 - LogFormatter customization and log-record helpers; SMTP mail with deprecation warnings;
-  cURL conversion, JSON serialization, job-directory, URL, and live-reference debugging helpers
+  cURL conversion, JSON serialization, job-directory, URL, and live-reference debugging helpers;
+  documented Python, misc, deprecation, and project utility functions
 - One-time import of standard Scrapy 2.19 `JOBDIR` layouts into SpiderOxide's native persistence
   format, including queued requests, duplicate fingerprints, callbacks, priorities, and spider state
 
@@ -57,12 +61,14 @@ format migration.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Remaining logging, signal, Deferred, and miscellaneous utility APIs — issue #47
 - Telnet and remote-control surfaces — issue #48
-- Deferred and reactor integration — issue #50
+- Twisted Deferred and reactor integration, including synchronous Scrapy signal-dispatch
+  results, `Failure` objects, and Deferred-returning mail — issue #50
+- Certification against third-party extensions and their additional utility needs — issue #49
 
-Importing one of these APIs fails normally instead of returning a placeholder with incorrect
-behavior.
+APIs not exported by the shim fail to import instead of returning placeholders. The native
+asyncio replacements for some Twisted-dependent methods are described below; they are not
+drop-in equivalents for Deferred-based components.
 
 ## Additive behavior
 
@@ -75,10 +81,14 @@ items, statistics, and the close reason.
 verified certificates, unlike Scrapy's permissive legacy TLS context. Twisted reactor logging
 bridges and Deferred-specific helpers remain outside this surface (issue #50).
 
-Native SpiderOxide download exceptions retain the additional `DownloadError`/`SpiderOxideError`
-base classes, so their full method-resolution order does not yet match Scrapy's directly inherited
-exceptions. The Scrapy exception names, error meanings, and tested attributes are available;
-code depending on exact base-class identity must remain on upstream Scrapy (issue #47).
+The public Scrapy-named download exceptions inherit directly from `Exception`, as in Scrapy 2.19.
+SpiderOxide's additional `DownloadError` is a separate native exception; catching it alone does
+not catch the Scrapy-named exceptions. The downloader and HTTP cache handle both families.
+
+SpiderOxide's native `SignalManager.send_catch_log()` is asynchronous and returns native failure
+records, whereas Scrapy's synchronous dispatcher returns Twisted `Failure` instances.
+`send_catch_log_async()` supports concurrent asynchronous handlers; Twisted-style signal dispatch
+and Deferred results are tracked under issue #50.
 
 SpiderOxide additionally exposes `scrapy.services.ServiceManager`, the `SERVICES` setting, and
 `Crawler.get_service()` for dependency-ordered crawler services with synchronous or asynchronous

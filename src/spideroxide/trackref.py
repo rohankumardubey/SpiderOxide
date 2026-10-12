@@ -39,8 +39,8 @@ def format_live_refs(ignore: type | tuple[type, ...] = NoneType) -> str:
     return report
 
 
-def print_live_refs(*args: Any, **kwargs: Any) -> None:
-    print(format_live_refs(*args, **kwargs))
+def print_live_refs(*a: Any, **kw: Any) -> None:
+    print(format_live_refs(*a, **kw))
 
 
 def get_oldest(class_name: str) -> object | None:

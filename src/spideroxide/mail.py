@@ -15,6 +15,14 @@ from typing import IO, Any
 
 logger = logging.getLogger(__name__)
 
+COMMASPACE = ", "
+
+
+def _to_bytes_or_none(text: str | bytes | None) -> bytes | None:
+    if text is None:
+        return None
+    return text.encode("utf-8") if isinstance(text, str) else text
+
 
 def _addresses(value: str | list[str] | None) -> list[str]:
     if value is None:
@@ -38,8 +46,8 @@ class MailSender:
     ) -> None:
         self.smtphost = smtphost
         self.mailfrom = mailfrom
-        self.smtpuser = None if smtpuser is None else smtpuser.encode()
-        self.smtppass = None if smtppass is None else smtppass.encode()
+        self.smtpuser = _to_bytes_or_none(smtpuser)
+        self.smtppass = _to_bytes_or_none(smtppass)
         self.smtpport = smtpport
         self.smtptls = smtptls
         self.smtpssl = smtpssl
@@ -73,11 +81,11 @@ class MailSender:
         recipients = _addresses(to)
         copies = _addresses(cc)
         msg["From"] = self.mailfrom
-        msg["To"] = ", ".join(recipients)
+        msg["To"] = COMMASPACE.join(recipients)
         msg["Date"] = formatdate(localtime=True)
         msg["Subject"] = subject
         if copies:
-            msg["Cc"] = ", ".join(copies)
+            msg["Cc"] = COMMASPACE.join(copies)
         if attachs:
             if charset:
                 msg.set_charset(charset)
@@ -91,7 +99,7 @@ class MailSender:
         else:
             msg.set_payload(body, charset)
 
-        if _callback is not None:
+        if _callback:
             _callback(
                 to=recipients,
                 subject=subject,
@@ -100,41 +108,55 @@ class MailSender:
                 attach=attachs,
                 msg=msg,
             )
-        details = {
-            "mailto": recipients,
-            "mailcc": copies,
-            "mailsubject": subject,
-            "mailattachs": len(attachs),
-        }
         if self.debug:
             logger.debug(
                 'Debug mail sent OK: To=%(mailto)s Cc=%(mailcc)s Subject="%(mailsubject)s" '
                 "Attachs=%(mailattachs)d",
-                details,
+                self._log_details(recipients, copies, subject, len(attachs)),
             )
             return None
 
         async def deliver() -> None:
             try:
-                await asyncio.to_thread(
+                result = await asyncio.to_thread(
                     self._sendmail,
                     [*recipients, *copies],
                     msg.as_string().encode(charset or "utf-8"),
                 )
+                self._sent_ok(result, recipients, copies, subject, len(attachs))
             except Exception as error:
-                logger.error(
-                    'Unable to send mail: To=%(mailto)s Cc=%(mailcc)s Subject="%(mailsubject)s" '
-                    "Attachs=%(mailattachs)d- %(mailerr)s",
-                    {**details, "mailerr": str(error)},
-                )
+                self._sent_failed(error, recipients, copies, subject, len(attachs))
                 raise
-            logger.info(
-                'Mail sent OK: To=%(mailto)s Cc=%(mailcc)s Subject="%(mailsubject)s" '
-                "Attachs=%(mailattachs)d",
-                details,
-            )
 
         return asyncio.get_running_loop().create_task(deliver())
+
+    @staticmethod
+    def _log_details(to: list[str], cc: list[str], subject: str, nattachs: int) -> dict[str, Any]:
+        return {
+            "mailto": to,
+            "mailcc": cc,
+            "mailsubject": subject,
+            "mailattachs": nattachs,
+        }
+
+    def _sent_ok(
+        self, result: Any, to: list[str], cc: list[str], subject: str, nattachs: int
+    ) -> None:
+        logger.info(
+            'Mail sent OK: To=%(mailto)s Cc=%(mailcc)s Subject="%(mailsubject)s" '
+            "Attachs=%(mailattachs)d",
+            self._log_details(to, cc, subject, nattachs),
+        )
+
+    def _sent_failed(
+        self, failure: Exception, to: list[str], cc: list[str], subject: str, nattachs: int
+    ) -> Exception:
+        logger.error(
+            'Unable to send mail: To=%(mailto)s Cc=%(mailcc)s Subject="%(mailsubject)s" '
+            "Attachs=%(mailattachs)d- %(mailerr)s",
+            {**self._log_details(to, cc, subject, nattachs), "mailerr": str(failure)},
+        )
+        return failure
 
     def _sendmail(self, recipients: list[str], message: bytes) -> None:
         smtp_class = smtplib.SMTP_SSL if self.smtpssl else smtplib.SMTP

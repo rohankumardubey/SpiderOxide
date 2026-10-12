@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import sys
+import weakref
 from collections import Counter
 from contextlib import suppress
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -408,6 +411,96 @@ async def _verify_signal_helpers() -> None:
     manager.disconnect_all("ready")
     assert manager.send_sync("ready") == []
     assert not manager.disconnect(good, "ready")
+
+    scope = object()
+    other_scope = object()
+    payload: list[tuple[object, object, int]] = []
+
+    def scoped(signal: object, sender: object, value: int) -> int:
+        payload.append((signal, sender, value))
+        return value + 1
+
+    manager.connect(scoped, scope, sender=scope)
+    manager.connect(scoped, scope, sender=scope)
+    assert manager.send_sync(scope, sender=other_scope, value=3) == []
+    assert manager.send_sync(scope, sender=scope, value=3) == [(scoped, 4)]
+    assert payload == [(scope, scope, 3)]
+    assert manager.disconnect(scoped, scope, sender=other_scope) is False
+    manager.disconnect_all(scope, sender=scope)
+    assert manager.send_sync(scope, sender=scope, value=3) == []
+
+    marker = object()
+    manager.connect(scoped, marker)
+    assert manager.send_sync(marker, value=4) == [(scoped, 5)]
+    assert payload[-1] == (marker, manager.sender, 4)
+    assert manager.disconnect(scoped, marker)
+
+    class Receiver:
+        def handle(self) -> str:
+            return "alive"
+
+    weak_receiver = Receiver()
+    receiver_ref = weakref.ref(weak_receiver)
+    manager.connect(weak_receiver.handle, "weak", weak=True)
+    assert manager.send_sync("weak")[0][1] == "alive"
+    assert manager.disconnect(weak_receiver.handle, "weak")
+    manager.connect(weak_receiver.handle, "weak", weak=True)
+    del weak_receiver
+    gc.collect()
+    assert receiver_ref() is None
+    assert manager.send_sync("weak") == []
+
+    def later() -> str:
+        return "later"
+
+    def mutate() -> str:
+        manager.disconnect(later, "snapshot")
+        manager.connect(lambda: "new", "snapshot")
+        return "first"
+
+    manager.connect(mutate, "snapshot")
+    manager.connect(later, "snapshot")
+    assert manager.send_sync("snapshot") == [(mutate, "first"), (later, "later")]
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked() -> str:
+        entered.set()
+        await release.wait()
+        return "finished"
+
+    async def unblock() -> str:
+        await entered.wait()
+        release.set()
+        return "released"
+
+    manager.connect(blocked, "concurrent")
+    manager.connect(unblock, "concurrent")
+    assert await asyncio.wait_for(manager.send_catch_log_async("concurrent"), 1) == [
+        (blocked, "finished"),
+        (unblock, "released"),
+    ]
+
+    def stopped() -> None:
+        raise StopDownload(fail=False)
+
+    manager.connect(stopped, "stopped")
+    with patch("spideroxide.signals.logger.exception") as logged:
+        responses = manager.send_sync("stopped")
+        async_responses = await manager.send_catch_log_async("stopped")
+    assert isinstance(responses[0][1], signals.SignalFailure)
+    assert isinstance(async_responses[0][1], StopDownload)
+    logged.assert_not_called()
+
+    async def unexpected_async() -> None:
+        return None
+
+    manager.connect(unexpected_async, "sync-only")
+    with patch("spideroxide.signals.logger.exception"):
+        sync_responses = manager.send_sync("sync-only")
+    assert isinstance(sync_responses[0][1], signals.SignalFailure)
+    assert isinstance(sync_responses[0][1].exception, TypeError)
 
 
 async def _verify() -> None:

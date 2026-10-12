@@ -26,21 +26,21 @@ def load_object(path: object) -> object:
 
 
 def build_from_crawler(
-    component: type,
+    objcls: type,
     crawler: object,
     /,
     *args: object,
     **kwargs: object,
 ) -> object:
-    factory = getattr(component, "from_crawler", None)
+    factory = getattr(objcls, "from_crawler", None)
     if factory is not None:
         instance = factory(crawler, *args, **kwargs)
         method_name = "from_crawler"
     else:
-        instance = component(*args, **kwargs)
+        instance = objcls(*args, **kwargs)
         method_name = "__new__"
     if instance is None:
-        raise TypeError(f"{component.__qualname__}.{method_name} returned None")
+        raise TypeError(f"{objcls.__qualname__}.{method_name} returned None")
     return instance
 
 

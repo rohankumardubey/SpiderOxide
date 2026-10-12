@@ -22,7 +22,7 @@ def _walk_modules(module_name: str) -> Iterable[ModuleType]:
         yield importlib.import_module(info.name)
 
 
-def _spider_classes(module: ModuleType) -> Iterable[type[Spider]]:
+def iter_spider_classes(module: ModuleType) -> Iterable[type[Spider]]:
     for value in vars(module).values():
         if (
             isinstance(value, type)
@@ -73,7 +73,7 @@ class SpiderLoader:
             )
 
     def _load_spiders(self, module: ModuleType) -> None:
-        for spider_class in _spider_classes(module):
+        for spider_class in iter_spider_classes(module):
             self._found[spider_class.name].append((module.__name__, spider_class.__name__))
             self._spiders[spider_class.name] = spider_class
 
