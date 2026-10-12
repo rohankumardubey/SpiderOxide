@@ -4,8 +4,10 @@ from collections.abc import Iterable
 from operator import itemgetter
 from time import monotonic_ns
 from types import NoneType
-from typing import Any, Self
+from typing import Any, TypeVar
 from weakref import WeakKeyDictionary
+
+_TObjectRef = TypeVar("_TObjectRef", bound="object_ref")
 
 live_refs: WeakKeyDictionary[type, WeakKeyDictionary[object, int]] = WeakKeyDictionary()
 
@@ -15,7 +17,7 @@ class object_ref:
 
     __slots__ = ()
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+    def __new__(cls: type[_TObjectRef], *args: Any, **kwargs: Any) -> _TObjectRef:
         instance = object.__new__(cls)
         try:
             references = live_refs[cls]
