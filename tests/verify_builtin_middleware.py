@@ -14,8 +14,8 @@ if str(ROOT) not in sys.path:
 from spideroxide import (
     Crawler,
     DefaultHeadersMiddleware,
-    DownloadError,
     DownloaderStatsMiddleware,
+    DownloadTimeoutError,
     DownloadTimeoutMiddleware,
     HtmlResponse,
     HttpAuthMiddleware,
@@ -546,7 +546,7 @@ async def _verify_request_timeouts() -> None:
                         meta={"download_timeout": 0.05},
                     )
                 )
-            except DownloadError as error:
+            except DownloadTimeoutError as error:
                 assert "timed out" in str(error).lower() or "timeout" in str(error).lower()
             else:
                 raise AssertionError(f"{downloader_type.__name__} ignored request timeout")

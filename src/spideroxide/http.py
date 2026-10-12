@@ -6,6 +6,7 @@ import copy
 import json
 import re
 import shlex
+import sys
 import warnings
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -538,6 +539,30 @@ class Response:
 
     def copy(self) -> Response:
         return self.replace()
+
+    def to_dict(self) -> dict[str, Any]:
+        values: dict[str, Any] = {"headers": self.headers.to_scrapy_dict()}
+        for name in self.attributes:
+            if name in {"request", "certificate"}:
+                continue
+            values.setdefault(name, getattr(self, name))
+        values["flags"] = list(self.flags)
+        if type(self) is not Response:
+            class_path = f"{type(self).__module__}.{type(self).__name__}"
+            if getattr(sys.modules.get("scrapy"), "spideroxide_compat_version", None):
+                scrapy_classes = {
+                    "spideroxide.http.TextResponse": "scrapy.http.response.text.TextResponse",
+                    "spideroxide.http.HtmlResponse": "scrapy.http.response.html.HtmlResponse",
+                    "spideroxide.http.XmlResponse": "scrapy.http.response.xml.XmlResponse",
+                    "scrapy._compat.JsonResponse": "scrapy.http.response.json.JsonResponse",
+                }
+                class_path = scrapy_classes.get(class_path, class_path)
+            values["_class"] = class_path
+        return values
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Response:
+        return cls(**{name: value for name, value in d.items() if name != "_class"})
 
     def urljoin(self, url: str) -> str:
         return _urljoin(self.url, url)

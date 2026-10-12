@@ -37,6 +37,7 @@ if __name__ == "__main__":
             "url",
             "serialized",
             "job_dir",
+            "spider_helpers",
         } <= candidate.keys()
     else:
         upstream = snapshot(shim=False)
@@ -44,5 +45,5 @@ if __name__ == "__main__":
             assert candidate[key] == value, (key, value, candidate[key])
     print(
         "Utility parity passed: formatter records, exceptions, request/response helpers, "
-        "trackref, curl, URL, JSON and mail APIs"
+        "spider discovery, trackref, curl, URL, JSON and mail APIs"
     )

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from .api import fingerprint_request
 from .components import load_object
 from .downloader import _response_type
-from .exceptions import DownloadError, IgnoreRequest, NotConfigured
+from .exceptions import _DOWNLOAD_ERRORS, IgnoreRequest, NotConfigured
 from .headers import Headers
 from .http import Request, Response
 from .signals import spider_closed, spider_opened
@@ -351,7 +351,7 @@ class HttpCacheMiddleware:
         cached = request.meta.pop("cached_response", None)
         if isinstance(cached, Response) and isinstance(
             exception,
-            (DownloadError, OSError, TimeoutError),
+            (*_DOWNLOAD_ERRORS, OSError, TimeoutError),
         ):
             self.stats.inc_value("httpcache/errorrecovery")  # type: ignore[attr-defined]
             return cached.replace(request=request)

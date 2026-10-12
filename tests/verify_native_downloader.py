@@ -13,8 +13,9 @@ if str(ROOT) not in sys.path:
 
 from spideroxide import (
     Crawler,
-    DownloadError,
+    DownloadCancelledError,
     DownloadHandlers,
+    DownloadTimeoutError,
     Headers,
     HTTPDownloadHandler,
     NativeCrawlEngine,
@@ -207,7 +208,7 @@ async def _verify() -> None:
         for path in ("/large", "/stream"):
             try:
                 await limited.fetch(Request(f"{base_url}{path}"))
-            except DownloadError as error:
+            except DownloadCancelledError as error:
                 assert "DOWNLOAD_MAXSIZE (5 bytes)" in str(error)
             else:
                 raise AssertionError("native downloader accepted an oversized response")
@@ -216,7 +217,7 @@ async def _verify() -> None:
         timeout_downloader = RustDownloader(Settings({"DOWNLOAD_TIMEOUT": 0.05}))
         try:
             await timeout_downloader.fetch(Request(f"{base_url}/slow"))
-        except DownloadError:
+        except DownloadTimeoutError:
             pass
         else:
             raise AssertionError("native downloader did not enforce DOWNLOAD_TIMEOUT")
