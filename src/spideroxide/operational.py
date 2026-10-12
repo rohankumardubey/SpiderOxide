@@ -2,23 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import gc
-import json
 import logging
+import math
 import pickle
 import sys
 import time
+import warnings
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from . import signals
-from .exceptions import NotConfigured
+from .compatutils import ScrapyJSONEncoder, job_dir
+from .exceptions import NotConfigured, ScrapyDeprecationWarning
+from .logutils import LogCounterHandler
 from .trackref import live_refs
 
 if TYPE_CHECKING:
     from .crawler import Crawler
     from .http import Request, Response
+    from .python_slots import PythonDownloadSlot
     from .spider import Spider
 
 logger = logging.getLogger(__name__)
@@ -95,19 +99,10 @@ class CoreStats:
         self.crawler.stats.inc_value("response_received_count")
 
 
-class _LogCounterHandler(logging.Handler):
-    def __init__(self, crawler: Crawler, level: object) -> None:
-        super().__init__(level=level)
-        self.crawler = crawler
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.crawler.stats.inc_value(f"log_count/{record.levelname}")
-
-
 class LogCount:
     def __init__(self, crawler: Crawler) -> None:
         self.crawler = crawler
-        self.handler: _LogCounterHandler | None = None
+        self.handler: LogCounterHandler | None = None
 
     @classmethod
     def from_crawler(cls, crawler: Crawler) -> LogCount:
@@ -117,7 +112,7 @@ class LogCount:
         return extension
 
     def spider_opened(self, spider: Spider) -> None:
-        self.handler = _LogCounterHandler(
+        self.handler = LogCounterHandler(
             self.crawler,
             level=self.crawler.settings.get("LOG_LEVEL", "DEBUG"),
         )
@@ -127,6 +122,84 @@ class LogCount:
         if self.handler is not None:
             logging.root.removeHandler(self.handler)
             self.handler = None
+
+
+class AutoThrottle:
+    def __init__(self, crawler: Crawler) -> None:
+        if not crawler.settings.getbool("AUTOTHROTTLE_ENABLED"):
+            raise NotConfigured
+        self.crawler = crawler
+        self.debug = crawler.settings.getbool("AUTOTHROTTLE_DEBUG")
+        self.target_concurrency = crawler.settings.getfloat("AUTOTHROTTLE_TARGET_CONCURRENCY")
+        if not math.isfinite(self.target_concurrency) or self.target_concurrency <= 0:
+            raise NotConfigured(
+                "AUTOTHROTTLE_TARGET_CONCURRENCY "
+                f"({self.target_concurrency!r}) must be higher than 0."
+            )
+        crawler.signals.connect(self._spider_opened, signals.spider_opened)
+        crawler.signals.connect(self._response_downloaded, signals.response_downloaded)
+
+    @classmethod
+    def from_crawler(cls, crawler: Crawler) -> AutoThrottle:
+        return cls(crawler)
+
+    def _min_delay(self) -> float:
+        return self.crawler.settings.getfloat("DOWNLOAD_DELAY")
+
+    def _max_delay(self) -> float:
+        return self.crawler.settings.getfloat("AUTOTHROTTLE_MAX_DELAY")
+
+    def _start_delay(self) -> float:
+        return max(self.mindelay, self.crawler.settings.getfloat("AUTOTHROTTLE_START_DELAY"))
+
+    def _spider_opened(self, spider: Spider) -> None:
+        self.mindelay = self._min_delay()
+        self.maxdelay = self._max_delay()
+
+    def _get_slot(
+        self, request: Request, spider: Spider
+    ) -> tuple[str | None, PythonDownloadSlot | None]:
+        key = request.meta.get("download_slot")
+        if not isinstance(key, str):
+            return None, None
+        slots = getattr(self.crawler.engine, "python_download_slots", None)
+        return key, None if slots is None else slots.slots.get(key)
+
+    def _adjust_delay(self, slot: PythonDownloadSlot, latency: float, response: Response) -> None:
+        target_delay = latency / self.target_concurrency
+        new_delay = max(target_delay, (slot.delay + target_delay) / 2)
+        new_delay = min(max(self.mindelay, new_delay), self.maxdelay)
+        if response.status != 200 and new_delay <= slot.delay:
+            return
+        slot.delay = new_delay
+
+    def _response_downloaded(self, response: Response, request: Request, spider: Spider) -> None:
+        key, slot = self._get_slot(request, spider)
+        latency = request.meta.get("download_latency")
+        if (
+            latency is None
+            or slot is None
+            or request.meta.get("autothrottle_dont_adjust_delay") is True
+        ):
+            return
+        old_delay = slot.delay
+        self._adjust_delay(slot, float(latency), response)
+        slot.next_start = max(slot.next_start, slot.last_start + slot.delay)
+        self.crawler.stats.set_value(f"downloader/slot/{key}/delay", slot.delay)
+        if self.debug:
+            logger.info(
+                "slot: %(slot)s | conc:%(concurrency)2d | delay:%(delay)5d ms "
+                "(%(delaydiff)+d) | latency:%(latency)5d ms | size:%(size)6d bytes",
+                {
+                    "slot": key,
+                    "concurrency": len(slot.transferring),
+                    "delay": slot.delay * 1000,
+                    "delaydiff": (slot.delay - old_delay) * 1000,
+                    "latency": float(latency) * 1000,
+                    "size": len(response.body),
+                },
+                extra={"spider": spider},
+            )
 
 
 class LogStats:
@@ -393,34 +466,42 @@ class MemoryDebugger:
 
 
 class SpiderState:
-    def __init__(self, crawler: Crawler) -> None:
-        jobdir = crawler.settings.get("JOBDIR")
-        if not jobdir:
-            raise NotConfigured
-        self.crawler = crawler
-        self.state_path = Path(str(jobdir)) / "spider.state"
+    def __init__(self, jobdir: str | None = None) -> None:
+        self.jobdir = jobdir
 
     @classmethod
     def from_crawler(cls, crawler: Crawler) -> SpiderState:
-        extension = cls(crawler)
+        directory = job_dir(crawler.settings)
+        if directory is None:
+            raise NotConfigured
+        extension = cls(directory)
+        extension.crawler = crawler
         crawler.signals.connect(extension.spider_opened, signals.spider_opened)
         crawler.signals.connect(extension.spider_closed, signals.spider_closed)
         return extension
 
+    @property
+    def statefn(self) -> str:
+        if self.jobdir is None:
+            raise RuntimeError("SpiderState requires a job directory")
+        return str(Path(self.jobdir, "spider.state"))
+
     def spider_opened(self, spider: Spider) -> None:
-        if getattr(self.crawler.engine, "backend_name", None) == "rust":
+        engine = getattr(getattr(self, "crawler", None), "engine", None)
+        if getattr(engine, "backend_name", None) == "rust":
             return
-        if self.state_path.exists():
-            with self.state_path.open("rb") as state_file:
+        state_path = Path(self.statefn)
+        if state_path.exists():
+            with state_path.open("rb") as state_file:
                 spider.state = pickle.load(state_file)
         else:
             spider.state = {}
 
-    def spider_closed(self, spider: Spider, reason: str) -> None:
-        if getattr(self.crawler.engine, "backend_name", None) == "rust":
+    def spider_closed(self, spider: Spider) -> None:
+        engine = getattr(getattr(self, "crawler", None), "engine", None)
+        if getattr(engine, "backend_name", None) == "rust":
             return
-        self.state_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.state_path.open("wb") as state_file:
+        with Path(self.statefn).open("wb") as state_file:
             pickle.dump(spider.state, state_file, protocol=4)
 
 
@@ -451,99 +532,133 @@ def _periodic_filter(value: object, setting_name: str) -> dict[str, tuple[str, .
     return parsed
 
 
-def _filter_stats(
-    stats: Mapping[str, object],
-    config: Mapping[str, tuple[str, ...]],
-) -> dict[str, object]:
-    include = config["include"]
-    exclude = config["exclude"]
-    return {
-        key: value
-        for key, value in stats.items()
-        if (not include or any(pattern in key for pattern in include))
-        and not any(pattern in key for pattern in exclude)
-    }
-
-
 class PeriodicLog:
-    def __init__(self, crawler: Crawler) -> None:
-        self.crawler = crawler
-        settings = crawler.settings
-        self.interval = settings.getfloat("LOGSTATS_INTERVAL", 60.0)
-        self.stats_config = _periodic_filter(
-            settings.get("PERIODIC_LOG_STATS", False),
-            "PERIODIC_LOG_STATS",
-        )
-        self.delta_config = _periodic_filter(
-            settings.get("PERIODIC_LOG_DELTA", False),
-            "PERIODIC_LOG_DELTA",
-        )
-        self.timing_enabled = settings.getbool("PERIODIC_LOG_TIMING_ENABLED", False)
-        if self.interval <= 0 or not (
-            self.stats_config is not None or self.delta_config is not None or self.timing_enabled
-        ):
-            raise NotConfigured
+    def __init__(
+        self,
+        stats: object,
+        interval: float = 60.0,
+        ext_stats: dict[str, object] | None = None,
+        ext_delta: dict[str, object] | None = None,
+        ext_timing_enabled: bool = False,
+    ) -> None:
+        self.stats = stats
+        self.interval = interval
+        self._multiplier = 60.0 / interval
+        self.encoder = ScrapyJSONEncoder(sort_keys=True, indent=4)
+        self.ext_stats_enabled = bool(ext_stats)
+        self.ext_delta_enabled = bool(ext_delta)
+        self.ext_stats_include = tuple(ext_stats.get("include", ())) if ext_stats else ()
+        self.ext_stats_exclude = tuple(ext_stats.get("exclude", ())) if ext_stats else ()
+        self.ext_delta_include = tuple(ext_delta.get("include", ())) if ext_delta else ()
+        self.ext_delta_exclude = tuple(ext_delta.get("exclude", ())) if ext_delta else ()
+        self.ext_timing_enabled = ext_timing_enabled
+        self.task: asyncio.Task[None] | None = None
         self._task: asyncio.Task[None] | None = None
-        self._previous: dict[str, object] = {}
-        self._previous_log_time: datetime | None = None
+
+    @property
+    def multiplier(self) -> float:
+        warnings.warn(
+            "The PeriodicLog.multiplier attribute is deprecated.",
+            ScrapyDeprecationWarning,
+            stacklevel=2,
+        )
+        return self._multiplier
+
+    @multiplier.setter
+    def multiplier(self, value: float) -> None:
+        warnings.warn(
+            "The PeriodicLog.multiplier attribute is deprecated.",
+            ScrapyDeprecationWarning,
+            stacklevel=2,
+        )
+        self._multiplier = value
 
     @classmethod
     def from_crawler(cls, crawler: Crawler) -> PeriodicLog:
-        extension = cls(crawler)
+        settings = crawler.settings
+        interval = settings.getfloat("LOGSTATS_INTERVAL", 60.0)
+        stats_config = _periodic_filter(settings.get("PERIODIC_LOG_STATS"), "PERIODIC_LOG_STATS")
+        delta_config = _periodic_filter(settings.get("PERIODIC_LOG_DELTA"), "PERIODIC_LOG_DELTA")
+        timing_enabled = settings.getbool("PERIODIC_LOG_TIMING_ENABLED", False)
+        if interval <= 0 or (stats_config is None and delta_config is None and not timing_enabled):
+            raise NotConfigured
+        extension = cls(crawler.stats, interval, stats_config, delta_config, timing_enabled)
         crawler.signals.connect(extension.spider_opened, signals.spider_opened)
         crawler.signals.connect(extension.spider_closed, signals.spider_closed)
         return extension
 
     def spider_opened(self, spider: Spider) -> None:
-        self._previous_log_time = _utcnow()
-        self._previous = {}
-        self._log()
-        self._task = asyncio.create_task(self._periodic_log(spider))
+        self.time_prev = _utcnow()
+        self.delta_prev: dict[str, int | float] = {}
+        self.stats_prev: dict[str, object] = {}
+        self.log()
+        self.task = self._task = asyncio.create_task(self._periodic_log())
 
     async def spider_closed(self, spider: Spider, reason: str) -> None:
         await _cancel_task(self._task)
-        self._log()
+        self.task = self._task = None
+        self.log()
 
-    async def _periodic_log(self, spider: Spider) -> None:
+    async def _periodic_log(self) -> None:
         while True:
             await asyncio.sleep(self.interval)
-            self._log()
+            self.log()
 
-    def _log(self) -> None:
-        current = dict(self.crawler.stats.get_stats())
+    def log(self) -> None:
         payload: dict[str, object] = {}
-        if self.stats_config is not None:
-            payload["stats"] = _filter_stats(current, self.stats_config)
-        if self.delta_config is not None:
-            delta = {
-                key: value - self._previous.get(key, 0)
-                for key, value in current.items()
-                if isinstance(value, (int, float))
-                and isinstance(self._previous.get(key, 0), (int, float))
+        if self.ext_timing_enabled:
+            payload.update(self.log_timing())
+        if self.ext_delta_enabled:
+            payload.update(self.log_delta())
+        if self.ext_stats_enabled:
+            payload.update(self.log_crawler_stats())
+        logger.info(self.encoder.encode(payload))
+
+    def param_allowed(
+        self, stat_name: str, include: tuple[str, ...], exclude: tuple[str, ...]
+    ) -> bool:
+        return (not include or any(pattern in stat_name for pattern in include)) and not any(
+            pattern in stat_name for pattern in exclude
+        )
+
+    def log_delta(self) -> dict[str, object]:
+        current = {
+            key: value
+            for key, value in self.stats.get_stats().items()
+            if isinstance(value, (int, float))
+            and self.param_allowed(key, self.ext_delta_include, self.ext_delta_exclude)
+        }
+        delta = {key: value - self.delta_prev.get(key, 0) for key, value in current.items()}
+        self.delta_prev = current
+        return {"delta": delta}
+
+    def log_crawler_stats(self) -> dict[str, object]:
+        return {
+            "stats": {
+                key: value
+                for key, value in self.stats.get_stats().items()
+                if self.param_allowed(key, self.ext_stats_include, self.ext_stats_exclude)
             }
-            payload["delta"] = _filter_stats(delta, self.delta_config)
-        if self.timing_enabled:
-            now = _utcnow()
-            start_time = self.crawler.stats.get_value("start_time")
-            if not isinstance(start_time, datetime):
-                raise TypeError("start_time stat must be a datetime")
-            payload["time"] = {
-                "log_interval": self.interval,
-                "start_time": start_time,
-                "utcnow": now,
-                "log_interval_real": (
-                    (now - self._previous_log_time).total_seconds()
-                    if self._previous_log_time is not None
-                    else 0.0
-                ),
-                "elapsed": (now - start_time).total_seconds(),
-            }
-            self._previous_log_time = now
-        logger.info(json.dumps(payload, default=str, indent=4, sort_keys=True))
-        self._previous = current
+        }
+
+    def log_timing(self) -> dict[str, object]:
+        now = _utcnow()
+        start_time = self.stats.get_value("start_time")
+        if not isinstance(start_time, datetime):
+            raise TypeError("start_time stat must be a datetime")
+        values = {
+            "log_interval": self.interval,
+            "start_time": start_time,
+            "utcnow": now,
+            "log_interval_real": (now - self.time_prev).total_seconds(),
+            "elapsed": (now - start_time).total_seconds(),
+        }
+        self.time_prev = now
+        return {"time": values}
 
 
 __all__ = [
+    "AutoThrottle",
     "CloseSpider",
     "CoreStats",
     "LogCount",

@@ -92,8 +92,13 @@ class CrawlEngine:
         self._scheduler_wakeup = asyncio.Event()
         self._close_reason: str | None = None
         self.items: list[object] = []
+        self.python_download_slots = None
 
     async def crawl(self) -> CrawlResult:
+        if self.settings.getbool("AUTOTHROTTLE_ENABLED"):
+            from .python_slots import PythonDownloadSlots
+
+            self.python_download_slots = PythonDownloadSlots(self.crawler, self.spider)
         tasks: set[asyncio.Task[_OutputBatch]] = set()
         start_producer: asyncio.Task[None] | None = None
         next_start: asyncio.Task[object] | None = None
@@ -341,6 +346,18 @@ class CrawlEngine:
             )
 
     async def _download(self, request: Request) -> Request | Response:
+        slots = self.python_download_slots
+        if slots is not None:
+
+            async def fetch(current: Request) -> Response:
+                if (
+                    urlsplit(current.url).hostname is None
+                    and current.meta.get("download_slot") is None
+                ):
+                    return await self.downloader.fetch(current)
+                return await slots.download(current, self.downloader.fetch)
+
+            return await self.downloader_middleware.download(request, fetch)
         return await self.downloader_middleware.download(request, self.downloader.fetch)
 
     async def download_async(self, request: Request) -> Response:

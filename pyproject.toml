@@ -39,6 +39,9 @@ Repository = "https://github.com/rohankumardubey/SpiderOxide"
 Issues = "https://github.com/rohankumardubey/SpiderOxide/issues"
 
 [project.optional-dependencies]
+remote-control = [
+    "aiohttp>=3.9,<4",
+]
 images = [
     "Pillow>=10,<13",
 ]
@@ -57,6 +60,7 @@ remote-media = [
     "google-cloud-storage>=2.18,<4",
 ]
 dev = [
+    "aiohttp>=3.9,<4",
     "maturin>=1.7,<2",
     "ruff>=0.9,<1",
     "tomli>=2,<3; python_version < '3.11'",

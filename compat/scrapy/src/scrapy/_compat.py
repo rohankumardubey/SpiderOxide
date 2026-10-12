@@ -94,6 +94,7 @@ from spideroxide.middleware import (
     ItemPipelineManager,
     SpiderMiddlewareManager,
 )
+from spideroxide.remote_control import RemoteControl
 from spideroxide.responseutils import (
     get_base_url,
     get_meta_refresh,
@@ -109,6 +110,7 @@ from spideroxide.settings import (
     get_settings_priority,
 )
 from spideroxide.spiderloader import iter_spider_classes
+from spideroxide.telnet import TelnetConsole, update_telnet_vars
 
 logger = logging.getLogger("scrapy.utils.spider")
 
@@ -701,9 +703,11 @@ def install() -> None:
     from spideroxide.extensions import ExtensionManager
     from spideroxide.iterators import csviter, xmliter_lxml
     from spideroxide.linkextractors import IGNORED_EXTENSIONS
+    from spideroxide.operational import AutoThrottle, PeriodicLog
     from spideroxide.operational import CloseSpider as CloseSpiderExtension
     from spideroxide.pipelines import FSFilesStore
     from spideroxide.robots import RobotsTxtMiddleware
+    from spideroxide.statsmailer import StatsMailer
     from spideroxide.trackref import (
         format_live_refs,
         get_oldest,
@@ -983,6 +987,14 @@ def install() -> None:
     _module("scrapy.extensions.memusage", {"MemoryUsage": MemoryUsage})
     _module("scrapy.extensions.memdebug", {"MemoryDebugger": MemoryDebugger})
     _module("scrapy.extensions.spiderstate", {"SpiderState": SpiderState})
+    _module("scrapy.extensions.throttle", {"AutoThrottle": AutoThrottle})
+    _module("scrapy.extensions.periodic_log", {"PeriodicLog": PeriodicLog})
+    _module("scrapy.extensions.statsmailer", {"StatsMailer": StatsMailer})
+    _module(
+        "scrapy.extensions.telnet",
+        {"TelnetConsole": TelnetConsole, "update_telnet_vars": update_telnet_vars},
+    )
+    _module("scrapy.extensions.remote_control", {"RemoteControl": RemoteControl})
     _module("scrapy.extension", {"ExtensionManager": ExtensionManager})
 
     _module("scrapy.core", {}, package=True)

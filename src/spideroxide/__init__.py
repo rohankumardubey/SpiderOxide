@@ -107,9 +107,7 @@ from .httpcache import (
 )
 from .linkextractors import Link, LinkExtractor, LxmlLinkExtractor
 from .operational import (
-    CloseSpider as CloseSpiderExtension,
-)
-from .operational import (
+    AutoThrottle,
     CoreStats,
     LogCount,
     LogStats,
@@ -117,6 +115,9 @@ from .operational import (
     MemoryUsage,
     PeriodicLog,
     SpiderState,
+)
+from .operational import (
+    CloseSpider as CloseSpiderExtension,
 )
 from .pipelines import (
     FileException,
@@ -170,6 +171,7 @@ from .spidermiddlewares import (
     UrlLengthMiddleware,
 )
 from .stats import StatsCollector
+from .statsmailer import StatsMailer
 from .types import (
     Field,
     FingerprintRequest,
@@ -181,6 +183,7 @@ from .types import (
 )
 
 __all__ = [
+    "AutoThrottle",
     "BACKEND_ENV_VAR",
     "AsyncCrawlerProcess",
     "AsyncCrawlerRunner",
@@ -278,6 +281,7 @@ __all__ = [
     "MetaCopyDetectionMiddleware",
     "MetaRefreshMiddleware",
     "SpiderState",
+    "StatsMailer",
     "NotConfigured",
     "NotSupported",
     "NativeCrawlEngine",
