@@ -3,6 +3,7 @@ ruff>=0.9,<1
 tomli>=2,<3; python_version < "3.11"
 httpx[http2]>=0.27,<1
 httpx-socks[asyncio]>=0.13,<0.14
+aiohttp>=3.9,<4
 itemadapter>=0.13,<1
 itemloaders>=1.4,<2
 lxml>=4.9,<7

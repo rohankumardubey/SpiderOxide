@@ -24,7 +24,12 @@ reports in CI.
 - Built-in downloader and spider middleware modules and their Scrapy 2.19 class paths
 - File and image pipelines; Python, pretty-print, JSON, JSON Lines, CSV, XML, Marshal, and Pickle
   item exporters; filesystem, stdout, FTP, FTPS, S3, and GCS feed storage; post-processing; cache
-  policies; and operational extensions implemented by SpiderOxide
+  policies; and operational extensions implemented by SpiderOxide, including AutoThrottle,
+  PeriodicLog, and StatsMailer
+- `scrapy.extensions.remote_control.RemoteControl`: asyncio-native, authenticated HTTP `/status`
+  and explicitly opt-in `/execute` (see security notes below)
+- `scrapy.extensions.telnet.TelnetConsole`: import and configuration surface only; intentionally
+  does not bind a Telnet listener without Twisted reactor/Conch support (issue #50)
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
   response dictionary round-tripping, spider discovery and selection, project settings loading,
@@ -61,7 +66,7 @@ format migration.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Telnet and remote-control surfaces — issue #48
+- Twisted Telnet/Conch interactive console and its protocol/listener — issue #50
 - Twisted Deferred and reactor integration, including synchronous Scrapy signal-dispatch
   results, `Failure` objects, and Deferred-returning mail — issue #50
 - Certification against third-party extensions and their additional utility needs — issue #49
@@ -71,6 +76,38 @@ asyncio replacements for some Twisted-dependent methods are described below; the
 drop-in equivalents for Deferred-based components.
 
 ## Additive behavior
+
+### Local control
+
+Both control servers are **off by default**, unlike upstream Scrapy 2.19. To enable the HTTP
+status server, install `spideroxide[remote-control]` and set `REMOTE_CONTROL_ENABLED=True`.
+It listens only on `127.0.0.1`, on a random port, and authenticates every request with a
+cryptographically generated Bearer token. A discoverable job file containing that token is
+created under `$XDG_STATE_HOME/spideroxide/job_files` (or
+`~/.local/state/spideroxide/job_files`), or under `REMOTE_CONTROL_JOBS_DIR` if set.
+The directory must be private (mode 0700, owned by the current user) and job files have mode
+0600. If this cannot be enforced, the server shuts down and no job file is left behind.
+On platforms without POSIX owner/mode checks, the HTTP server is not configured.
+Job files are deleted, tokens invalidated, and the listener closed on crawl shutdown.
+Only grant filesystem access to trusted local users.
+
+`POST /execute` is absent unless both `REMOTE_CONTROL_ENABLED=True` and
+`REMOTE_CONTROL_EXECUTE_ENABLED=True`. Its `code` runs **arbitrary Python in the crawler
+process** with access to `crawler` and a per-server `stash`; only enable this for trusted
+operators. `REMOTE_CONTROL_CODE_MAX_BYTES` defaults to 64 KiB; response output and traceback
+limits default to 64 KiB and 16 KiB. Async code can be cancelled at an await point according
+to `REMOTE_CONTROL_TIMEOUT_DEFAULT` (30 seconds) and `REMOTE_CONTROL_TIMEOUT_MAX` (600
+seconds). Like Scrapy's remote control, synchronous blocking Python code cannot be interrupted
+by a timeout; neither endpoint is suitable for exposure to untrusted local users. The
+TelnetConsole constructor raises `NotConfigured` even when enabled, rather than offering a
+plaintext, unauthenticated substitute for Scrapy's Twisted manhole.
+
+AutoThrottle adjusts Python-engine download slots through its public delay hook. The Rust engine
+applies the same delay policy in its native slot manager; overriding AutoThrottle's `_adjust_delay`
+hook in a subclass does not change the Rust policy. Twisted-backed Telnet protocol methods remain
+unavailable until issue #50.
+StatsMailer emits its deprecation warning when enabled rather than when its shim module is
+imported, since compatibility modules are registered eagerly.
 
 Completed crawler and runner tasks resolve to SpiderOxide's `CrawlResult` instead of Scrapy's
 `None`. Code that only awaits crawl completion is unchanged; callers may additionally inspect
