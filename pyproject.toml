@@ -39,6 +39,9 @@ Repository = "https://github.com/rohankumardubey/SpiderOxide"
 Issues = "https://github.com/rohankumardubey/SpiderOxide/issues"
 
 [project.optional-dependencies]
+twisted = [
+    "Twisted>=24.11,<27",
+]
 remote-control = [
     "aiohttp>=3.9,<4",
 ]

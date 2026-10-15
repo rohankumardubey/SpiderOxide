@@ -112,6 +112,18 @@ from spideroxide.settings import (
 )
 from spideroxide.spiderloader import iter_spider_classes
 from spideroxide.telnet import TelnetConsole, update_telnet_vars
+from spideroxide.twisted_compat import (
+    deferred_f_from_coro_f,
+    deferred_from_coro,
+    deferred_to_future,
+    ensure_awaitable,
+    install_reactor,
+    is_asyncio_reactor_installed,
+    is_reactor_installed,
+    maybe_deferred_to_future,
+    verify_installed_asyncio_event_loop,
+    verify_installed_reactor,
+)
 
 logger = logging.getLogger("scrapy.utils.spider")
 
@@ -1095,6 +1107,26 @@ def install() -> None:
             "is_asyncio_available": is_asyncio_available,
             "run_in_thread": run_in_thread,
             "sleep": sleep,
+        },
+    )
+    _module(
+        "scrapy.utils.defer",
+        {
+            "deferred_f_from_coro_f": deferred_f_from_coro_f,
+            "deferred_from_coro": deferred_from_coro,
+            "deferred_to_future": deferred_to_future,
+            "ensure_awaitable": ensure_awaitable,
+            "maybe_deferred_to_future": maybe_deferred_to_future,
+        },
+    )
+    _module(
+        "scrapy.utils.reactor",
+        {
+            "install_reactor": install_reactor,
+            "is_asyncio_reactor_installed": is_asyncio_reactor_installed,
+            "is_reactor_installed": is_reactor_installed,
+            "verify_installed_asyncio_event_loop": verify_installed_asyncio_event_loop,
+            "verify_installed_reactor": verify_installed_reactor,
         },
     )
     _module(

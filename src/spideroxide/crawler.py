@@ -20,6 +20,7 @@ from .signals import SignalManager
 from .spider import Spider
 from .spiderloader import SpiderLoader
 from .stats import StatsCollector
+from .twisted_compat import ASYNCIO_REACTOR, start_reactor, stop_reactor
 from .utils import maybe_await
 
 _Component = TypeVar("_Component")
@@ -74,8 +75,16 @@ class Crawler:
         self._crawl_task = asyncio.current_task()
         downloader = self.downloader
         engine_entered = False
+        reactor_started = False
         primary_error: BaseException | None = None
         try:
+            reactor_path = self.settings.get("TWISTED_REACTOR")
+            if reactor_path or self._init_reactor:
+                start_reactor(
+                    str(reactor_path or ASYNCIO_REACTOR),
+                    self.settings.get("ASYNCIO_EVENT_LOOP"),
+                )
+                reactor_started = True
             self.spider = self.spidercls.from_crawler(self, *args, **kwargs)
             self.addons.load_settings(self.settings)
             formatter_class = load_object(self.settings["LOG_FORMATTER"])
@@ -116,6 +125,14 @@ class Crawler:
                         stop_error = error
                     else:
                         logging.getLogger(__name__).exception("Error stopping crawler services")
+            if reactor_started:
+                try:
+                    await stop_reactor()
+                except Exception as error:
+                    if primary_error is None and stop_error is None:
+                        stop_error = error
+                    else:
+                        logging.getLogger(__name__).exception("Error stopping Twisted reactor")
             self.crawling = False
             if stop_error is not None:
                 raise stop_error

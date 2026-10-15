@@ -5,6 +5,8 @@ from collections.abc import AsyncIterable, Iterable
 
 from itemadapter import ItemAdapter
 
+from .twisted_compat import await_deferred, is_deferred
+
 
 def _is_output_collection(value: object) -> bool:
     return (
@@ -15,6 +17,8 @@ def _is_output_collection(value: object) -> bool:
 
 
 async def maybe_await(value: object) -> object:
+    if is_deferred(value):
+        return await await_deferred(value)
     if inspect.isawaitable(value):
         return await value
     return value

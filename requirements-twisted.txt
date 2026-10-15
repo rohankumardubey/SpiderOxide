@@ -1,0 +1,2 @@
+# Pinned optional reactor used by the Twisted interoperability suite.
+Twisted==26.4.0
