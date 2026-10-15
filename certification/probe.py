@@ -173,14 +173,16 @@ async def xlsx_blocked(backend: str) -> None:
 
 
 async def playwright_blocked(backend: str) -> None:
+    from scrapy_playwright.handler import ScrapyPlaywrightDownloadHandler
+
     try:
-        from scrapy_playwright.handler import ScrapyPlaywrightDownloadHandler
-    except ModuleNotFoundError as error:
-        assert error.name == "scrapy.utils.defer", str(error)
-    else:
-        raise AssertionError(
-            f"browser handler unexpectedly imports: {ScrapyPlaywrightDownloadHandler}"
+        ScrapyPlaywrightDownloadHandler.from_crawler(
+            Crawler(ItemSpider, {"ENGINE_BACKEND": backend})
         )
+    except RuntimeError as error:
+        assert "No Twisted reactor is installed" in str(error), str(error)
+    else:
+        raise AssertionError("Playwright handler initialized without an opt-in Twisted reactor")
 
 
 async def redis_pipeline_blocked(backend: str) -> None:
@@ -199,6 +201,28 @@ async def redis_pipeline_blocked(backend: str) -> None:
         pending.cancel()
 
 
+async def redis_pipeline_twisted(backend: str) -> None:
+    import fakeredis
+    from scrapy_redis.pipelines import RedisPipeline
+
+    server = fakeredis.FakeRedis()
+    pipeline = RedisPipeline(server)
+    crawler = Crawler(
+        ItemSpider,
+        {
+            "ENGINE_BACKEND": backend,
+            "TWISTED_REACTOR": "twisted.internet.asyncioreactor.AsyncioSelectorReactor",
+            "ITEM_PIPELINES": {pipeline: 100},
+            "ROBOTSTXT_OBEY": False,
+        },
+    )
+    result = await crawler.crawl()
+    assert result.items == ({"title": "certified"},), result.items
+    assert [json.loads(value) for value in server.lrange("certification:items", 0, -1)] == [
+        {"title": "certified"}
+    ]
+
+
 CASES = {
     "deltafetch": deltafetch,
     "spidermon-validation": spidermon_validation,
@@ -208,6 +232,7 @@ CASES = {
     "zyte-blocked": zyte_blocked,
     "playwright-blocked": playwright_blocked,
     "redis-pipeline-blocked": redis_pipeline_blocked,
+    "redis-pipeline-twisted": redis_pipeline_twisted,
 }
 
 

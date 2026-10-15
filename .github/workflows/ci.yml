@@ -56,6 +56,9 @@ jobs:
       - name: Build editable release extension
         run: .venv/bin/maturin develop --release
 
+      - name: Install pinned optional Twisted test dependency
+        run: .venv/bin/python -m pip install -r requirements-twisted.txt
+
       - name: Run integration and compatibility suite
         run: .venv/bin/python tests/run_all.py
 

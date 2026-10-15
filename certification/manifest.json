@@ -23,7 +23,7 @@
       "status": "certified",
       "scope": "standalone Redis-backed duplicate-filter component",
       "public_apis": ["scrapy.dupefilters.BaseDupeFilter", "scrapy.utils.python.to_unicode"],
-      "limitations": "Native engines do not wire the DUPEFILTER_CLASS setting; RedisPipeline requires Twisted."
+      "limitations": "Native engines do not wire the DUPEFILTER_CLASS setting; RedisPipeline requires the opt-in asyncio reactor."
     },
     {
       "id": "splash",
@@ -53,9 +53,9 @@
       "id": "playwright-blocked",
       "distribution": "scrapy-playwright",
       "status": "blocked",
-      "scope": "blocked asyncio browser download handler",
+      "scope": "browser handler rejects initialization without an opt-in reactor",
       "public_apis": ["scrapy.utils.defer", "scrapy.utils.reactor"],
-      "limitations": "Requires Twisted Deferred and AsyncioSelectorReactor; no browser binaries installed."
+      "limitations": "The handler imports but requires an installed asyncio reactor; actual Playwright browser execution is not certified."
     },
     {
       "id": "redis-pipeline-blocked",
@@ -63,7 +63,15 @@
       "status": "blocked",
       "scope": "blocked Redis item pipeline",
       "public_apis": ["scrapy.utils.misc.load_object"],
-      "limitations": "process_item returns a Deferred from twisted.internet.threads.deferToThread."
+      "limitations": "Without the opt-in asyncio reactor, process_item returns a Deferred that cannot complete."
+    },
+    {
+      "id": "redis-pipeline-twisted",
+      "distribution": "scrapy-redis",
+      "status": "certified",
+      "scope": "Redis item pipeline with opt-in Twisted asyncio reactor",
+      "public_apis": ["twisted.internet.threads.deferToThread", "scrapy.utils.serialize.ScrapyJSONEncoder"],
+      "limitations": "Requires spideroxide[twisted] and TWISTED_REACTOR; repeated crawls must share the installed asyncio loop."
     }
   ]
 }

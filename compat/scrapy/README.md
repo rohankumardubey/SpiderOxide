@@ -25,6 +25,12 @@ and custom spider contracts support synchronous and asynchronous callbacks. Miss
 explicit and are tracked in the main compatibility roadmap; the shim does not silently substitute
 incomplete behavior.
 
+For Deferred-returning middleware, pipelines, handlers, callbacks, and signals, install
+`spideroxide[twisted]` and set
+`TWISTED_REACTOR="twisted.internet.asyncioreactor.AsyncioSelectorReactor"` before crawling.
+The asyncio reactor must be installed on the current event loop; other reactors are rejected.
+See [compatibility boundaries](COMPATIBILITY.md#opt-in-twisted-bridge) before enabling it.
+
 ```bash
 scrapy startproject example
 cd example

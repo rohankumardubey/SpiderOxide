@@ -246,8 +246,9 @@ results = process.start()
 Use a runner rather than a process when an event loop is already running. `SpiderLoader` discovers
 spiders recursively from `SPIDER_MODULES`, allowing `runner.crawl("spider-name")` in project-style
 applications. Scrapy-compatible projects can keep imports from `scrapy.crawler` and
-`scrapy.spiderloader`; SpiderOxide's orchestration is asyncio-native, while Twisted `Deferred` and
-reactor integration remain outside the compatibility surface.
+`scrapy.spiderloader`; SpiderOxide's orchestration is asyncio-native. An
+[opt-in asyncio-reactor bridge](compat/scrapy/COMPATIBILITY.md#opt-in-twisted-bridge) accepts
+Deferred results at crawl extension points, but does not provide Twisted's full lifecycle.
 
 ### Settings and component lifecycle
 
@@ -1465,7 +1466,7 @@ robots policy, caching, persistent jobs, items, media pipelines, feed exports, p
 handlers, extensions, signals, and statistics. Both crawl engines are exercised against the same
 compatibility suite.
 
-Known gaps include Twisted interoperability. Exact third-party component compatibility and
+Known gaps include full Twisted interoperability. Exact third-party component compatibility and
 production hardening also remain ongoing work.
 
 The intended end state is a Rust production core with Python retained as the public spider,

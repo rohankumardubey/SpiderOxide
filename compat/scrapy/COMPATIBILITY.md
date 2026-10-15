@@ -31,7 +31,7 @@ integration components and records the exact boundaries of each result on both e
 - `scrapy.extensions.remote_control.RemoteControl`: asyncio-native, authenticated HTTP `/status`
   and explicitly opt-in `/execute` (see security notes below)
 - `scrapy.extensions.telnet.TelnetConsole`: import and configuration surface only; intentionally
-  does not bind a Telnet listener without Twisted reactor/Conch support (issue #50)
+  does not bind a Telnet listener without Twisted reactor/Conch support (issue #48)
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
   response dictionary round-tripping, spider discovery and selection, project settings loading,
@@ -45,6 +45,8 @@ integration components and records the exact boundaries of each result on both e
   documented Python, misc, deprecation, and project utility functions
 - One-time import of standard Scrapy 2.19 `JOBDIR` layouts into SpiderOxide's native persistence
   format, including queued requests, duplicate fingerprints, callbacks, priorities, and spider state
+- Opt-in Twisted asyncio-reactor bridge for Deferred-returning crawler extension points, including
+  downloader and spider middleware, pipelines, handlers, callbacks, and asynchronous signals
 
 ## Persistence and project formats
 
@@ -68,16 +70,39 @@ format migration.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Twisted Telnet/Conch interactive console and its protocol/listener — issue #50
-- Twisted Deferred and reactor integration, including synchronous Scrapy signal-dispatch
-  results, `Failure` objects, and Deferred-returning mail — issue #50
-- Full third-party coverage beyond the certified components and blocked cases — issue #49
+- Twisted Telnet/Conch interactive console and its protocol/listener — issue #48
+- Non-asyncio reactors, full Twisted protocol internals, synchronous Scrapy signal-dispatch
+  `Failure` results, and Deferred-returning mail — issue #50
+- Third-party components beyond the tested certification boundaries
 
 APIs not exported by the shim fail to import instead of returning placeholders. The native
 asyncio replacements for some Twisted-dependent methods are described below; they are not
 drop-in equivalents for Deferred-based components.
 
 ## Additive behavior
+
+### Opt-in Twisted bridge
+
+Install `spideroxide[twisted]` and configure
+`TWISTED_REACTOR="twisted.internet.asyncioreactor.AsyncioSelectorReactor"` to accept Twisted
+`Deferred` results from asynchronous extension points on either crawl engine. Both
+`scrapy.utils.defer` conversion helpers and `scrapy.utils.reactor` installation and verification
+helpers expose the supported asyncio-reactor subset. `Crawler(..., init_reactor=True)` also opts
+in. Without opt-in, ordinary crawls do not install or start a Twisted reactor and Deferred results
+fail explicitly. `scrapy-redis`'s unchanged item pipeline is certified with the opt-in setting.
+
+The supported reactor must share the crawler's **running asyncio event loop**; an already-installed
+different reactor, a reactor bound to another loop, and a mismatched `ASYNCIO_EVENT_LOOP` setting
+raise errors. SpiderOxide starts Twisted's threadpool for `deferToThread` and stops it, cancels
+delayed calls, and disconnects transports after the last concurrent crawler finishes. Repeated
+and concurrent crawls work on the same event loop; a new event loop requires a new process
+because Twisted's installed reactor remains bound to the original loop. Threadpool teardown
+uses Twisted's internal cleanup hook to replace its unrestartable pool, which is covered by the
+pinned Twisted integration tests. The reactor itself is not driven through Twisted's
+`run()`/`stop()` lifecycle, since that would stop the asyncio loop owned by SpiderOxide. Thus
+`reactor.running` remains false, reactor startup/shutdown triggers do not fire, and components
+requiring them are not certified. Timers, `deferToThread`, Deferred errors, cancellation, and
+timeouts are covered; browser execution and Telnet/Conch are not.
 
 ### Local control
 
@@ -106,8 +131,7 @@ plaintext, unauthenticated substitute for Scrapy's Twisted manhole.
 
 AutoThrottle adjusts Python-engine download slots through its public delay hook. The Rust engine
 applies the same delay policy in its native slot manager; overriding AutoThrottle's `_adjust_delay`
-hook in a subclass does not change the Rust policy. Twisted-backed Telnet protocol methods remain
-unavailable until issue #50.
+hook in a subclass does not change the Rust policy. Twisted-backed Telnet protocol methods remain unavailable until issue #48.
 StatsMailer emits its deprecation warning when enabled rather than when its shim module is
 imported, since compatibility modules are registered eagerly.
 
@@ -118,7 +142,7 @@ items, statistics, and the close reason.
 `MailSender.send()` schedules delivery and returns an `asyncio.Task` instead of a Twisted
 `Deferred`. Await the task when the result matters; debug mode returns `None`. SMTP TLS uses
 verified certificates, unlike Scrapy's permissive legacy TLS context. Twisted reactor logging
-bridges and Deferred-specific helpers remain outside this surface (issue #50).
+bridges and the full Deferred utility surface remain outside this subset (issue #50).
 
 The public Scrapy-named download exceptions inherit directly from `Exception`, as in Scrapy 2.19.
 SpiderOxide's additional `DownloadError` is a separate native exception; catching it alone does
@@ -126,8 +150,8 @@ not catch the Scrapy-named exceptions. The downloader and HTTP cache handle both
 
 SpiderOxide's native `SignalManager.send_catch_log()` is asynchronous and returns native failure
 records, whereas Scrapy's synchronous dispatcher returns Twisted `Failure` instances.
-`send_catch_log_async()` supports concurrent asynchronous handlers; Twisted-style signal dispatch
-and Deferred results are tracked under issue #50.
+`send_catch_log_async()` supports concurrent asynchronous handlers, including Deferred results
+with opt-in. Synchronous Scrapy-style signal dispatch and Twisted `Failure` results remain gaps.
 
 SpiderOxide additionally exposes `scrapy.services.ServiceManager`, the `SERVICES` setting, and
 `Crawler.get_service()` for dependency-ordered crawler services with synchronous or asynchronous
