@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "integrations": [
+    {
+      "id": "deltafetch",
+      "distribution": "scrapy-deltafetch",
+      "status": "certified",
+      "scope": "certified spider middleware: persistent duplicate filtering",
+      "public_apis": ["scrapy.signals", "scrapy.http.Request", "scrapy.utils.project.data_path", "StatsCollector.inc_value(spider=...)"],
+      "limitations": "The DBM database must be on a writable local filesystem."
+    },
+    {
+      "id": "spidermon-validation",
+      "distribution": "spidermon",
+      "status": "certified",
+      "scope": "certified item-validation pipeline",
+      "public_apis": ["scrapy.exceptions.DropItem", "scrapy.utils.misc.load_object"],
+      "limitations": "Periodic monitor extensions use Twisted LoopingCall and are not certified."
+    },
+    {
+      "id": "redis-dupefilter",
+      "distribution": "scrapy-redis",
+      "status": "certified",
+      "scope": "standalone Redis-backed duplicate-filter component",
+      "public_apis": ["scrapy.dupefilters.BaseDupeFilter", "scrapy.utils.python.to_unicode"],
+      "limitations": "Native engines do not wire the DUPEFILTER_CLASS setting; RedisPipeline requires Twisted."
+    },
+    {
+      "id": "splash",
+      "distribution": "scrapy-splash",
+      "status": "certified",
+      "scope": "browser-service request and middleware integration (no external Splash service)",
+      "public_apis": ["scrapy.http.Request", "scrapy.utils.request.RequestFingerprinterProtocol"],
+      "limitations": "Set slot_policy='single_slot' to avoid private downloader._get_slot_key; external Splash service is not certified."
+    },
+    {
+      "id": "xlsx-blocked",
+      "distribution": "scrapy-xlsx",
+      "status": "blocked",
+      "scope": "blocked XLSX feed exporter",
+      "public_apis": ["scrapy.exporters.BaseItemExporter"],
+      "limitations": "Uses private _get_serialized_fields, absent in both Scrapy 2.19 and SpiderOxide; last release was 2019."
+    },
+    {
+      "id": "zyte-blocked",
+      "distribution": "scrapy-zyte-smartproxy",
+      "status": "blocked",
+      "scope": "blocked proxy middleware",
+      "public_apis": ["scrapy.resolver.dnscache"],
+      "limitations": "scrapy.resolver.dnscache is not backed by SpiderOxide DNS; a stub would hide broken ban tracking."
+    },
+    {
+      "id": "playwright-blocked",
+      "distribution": "scrapy-playwright",
+      "status": "blocked",
+      "scope": "blocked asyncio browser download handler",
+      "public_apis": ["scrapy.utils.defer", "scrapy.utils.reactor"],
+      "limitations": "Requires Twisted Deferred and AsyncioSelectorReactor; no browser binaries installed."
+    },
+    {
+      "id": "redis-pipeline-blocked",
+      "distribution": "scrapy-redis",
+      "status": "blocked",
+      "scope": "blocked Redis item pipeline",
+      "public_apis": ["scrapy.utils.misc.load_object"],
+      "limitations": "process_item returns a Deferred from twisted.internet.threads.deferToThread."
+    }
+  ]
+}

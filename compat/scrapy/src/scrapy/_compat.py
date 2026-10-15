@@ -11,10 +11,11 @@ from configparser import ConfigParser
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlparse, urlsplit, urlunparse
 
 from w3lib.http import headers_dict_to_raw
+from w3lib.url import canonicalize_url
 
 import spideroxide
 from spideroxide import signals as spideroxide_signals
@@ -133,6 +134,14 @@ class RequestFingerprinter:
 
     def fingerprint(self, request: object) -> bytes:
         return fingerprint_request(request)
+
+
+class RequestFingerprinterProtocol(Protocol):
+    def fingerprint(self, request: object) -> bytes: ...
+
+
+def request_fingerprint(request: object) -> str:
+    return fingerprint_request(request).hex()
 
 
 class JsonResponse(spideroxide.TextResponse):
@@ -807,6 +816,7 @@ def install() -> None:
         "scrapy.settings.default_settings",
         {
             **DEFAULT_SETTINGS,
+            "REQUEST_FINGERPRINTER_CLASS": "scrapy.utils.request.RequestFingerprinter",
             "SETTINGS_PRIORITIES": PRIORITIES,
         },
     )
@@ -1168,8 +1178,10 @@ def install() -> None:
         "scrapy.utils.request",
         {
             "RequestFingerprinter": RequestFingerprinter,
+            "RequestFingerprinterProtocol": RequestFingerprinterProtocol,
             "fingerprint": fingerprint,
             "referer_str": referer_str,
+            "request_fingerprint": request_fingerprint,
             "request_from_dict": request_from_dict,
             "request_httprepr": request_httprepr,
             "request_to_curl": request_to_curl,
@@ -1205,6 +1217,7 @@ def install() -> None:
         "scrapy.utils.url",
         {
             "add_http_if_no_scheme": add_http_if_no_scheme,
+            "canonicalize_url": canonicalize_url,
             "guess_scheme": guess_scheme,
             "strip_url": strip_url,
             "url_has_any_extension": url_has_any_extension,

@@ -33,3 +33,4 @@ target/
 *.prof
 *.trace
 conformance-results/
+certification-results/

@@ -13,6 +13,8 @@ must not be installed into the same environment. Use separate environments when 
 differential tests. The shim detects an installed upstream `Scrapy` distribution and raises an
 explicit error rather than loading a mixed namespace. Repository differential tests may set
 `SPIDEROXIDE_SCRAPY_COMPAT_ALLOW_CONFLICT=1` because they control `sys.path` and process isolation.
+The [pinned third-party certification suite](../../certification/README.md) also uses this
+test-only isolation to exercise packages whose dependencies install upstream Scrapy.
 
 The shim covers APIs already implemented by SpiderOxide, including requests and responses, items,
 selectors, loaders, spiders and crawl rules, settings, signals, middleware, download handlers,
