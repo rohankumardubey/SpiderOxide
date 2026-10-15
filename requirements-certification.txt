@@ -1,0 +1,10 @@
+# Exact third-party versions exercised by certification/run.py.
+scrapy-deltafetch==2.1.0
+scrapy-xlsx==0.1.1
+scrapy-redis==0.9.1
+scrapy-splash==0.11.1
+scrapy-zyte-smartproxy==2.4.1
+scrapy-playwright==0.0.48
+spidermon==1.27.0
+fakeredis==2.31.0
+openpyxl==3.1.5

@@ -5,6 +5,8 @@ documented imports to SpiderOxide implementations without installing or importin
 The version-pinned [`conformance` suite](../../conformance/README.md) compares supported public
 behavior with Scrapy 2.19.0 on both SpiderOxide crawl engines and publishes JSON and Markdown
 reports in CI.
+The [third-party certification matrix](../../certification/README.md) exercises pinned
+integration components and records the exact boundaries of each result on both engines.
 
 ## Supported
 
@@ -69,7 +71,7 @@ The shim intentionally omits public APIs that SpiderOxide has not implemented ye
 - Twisted Telnet/Conch interactive console and its protocol/listener — issue #50
 - Twisted Deferred and reactor integration, including synchronous Scrapy signal-dispatch
   results, `Failure` objects, and Deferred-returning mail — issue #50
-- Certification against third-party extensions and their additional utility needs — issue #49
+- Full third-party coverage beyond the certified components and blocked cases — issue #49
 
 APIs not exported by the shim fail to import instead of returning placeholders. The native
 asyncio replacements for some Twisted-dependent methods are described below; they are not

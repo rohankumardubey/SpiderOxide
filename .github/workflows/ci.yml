@@ -59,6 +59,22 @@ jobs:
       - name: Run integration and compatibility suite
         run: .venv/bin/python tests/run_all.py
 
+      - name: Install pinned third-party integrations
+        run: .venv/bin/python -m pip install -r requirements-certification.txt
+
+      - name: Certify third-party integrations
+        run: |
+          .venv/bin/python certification/run.py \
+            --output-dir certification-results/python-${{ matrix.python-version }}
+
+      - name: Upload third-party certification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: third-party-certification-python-${{ matrix.python-version }}
+          path: certification-results/python-${{ matrix.python-version }}/
+          if-no-files-found: ignore
+
       - name: Install Scrapy conformance baseline
         run: .venv/bin/python -m pip install -r requirements-conformance.txt
 
