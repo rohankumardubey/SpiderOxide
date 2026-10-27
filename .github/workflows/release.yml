@@ -96,6 +96,41 @@ jobs:
           cp dist/spideroxide_scrapy_compat-*-py3-none-any.whl smoke-dist/
           python tests/distribution_smoke.py --wheels smoke-dist --sdist dist/spideroxide-*.tar.gz
 
+      - name: Find previous published release
+        id: previous-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/spideroxide-releases.json
+          if jq -e --arg tag "$RELEASE_TAG" 'any(.[][]; .tag_name == $tag)' \
+            /tmp/spideroxide-releases.json > /dev/null; then
+            echo "::error::A release already exists for $RELEASE_TAG"
+            exit 1
+          fi
+          previous_tag="$(jq -r '[.[][] | select(.draft == false)] |
+            sort_by(.published_at) | last | .tag_name // ""' /tmp/spideroxide-releases.json)"
+          echo "tag=$previous_tag" >> "$GITHUB_OUTPUT"
+          if [[ -z "$previous_tag" ]]; then
+            echo "No previous published release; skipping the first-release upgrade test"
+          fi
+
+      - name: Download previous release wheels
+        if: steps.previous-release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ steps.previous-release.outputs.tag }}
+        run: |
+          mkdir previous-dist
+          gh release download "$PREVIOUS_TAG" --dir previous-dist \
+            --pattern 'spideroxide-*-cp310-cp310-manylinux*_x86_64.whl' \
+            --pattern 'spideroxide_scrapy_compat-*-py3-none-any.whl'
+
+      - name: Upgrade and smoke-test installed distributions
+        if: steps.previous-release.outputs.tag != ''
+        run: python tests/distribution_smoke.py --wheels smoke-dist --previous-wheels previous-dist
+
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
