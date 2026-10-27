@@ -1,5 +1,43 @@
 # Compatibility surface
 
+## Version and deprecation policy
+
+| SpiderOxide / shim release | Scrapy API version | Compatibility mode | Status |
+| --- | --- | --- | --- |
+| 0.1.0 / 0.1.0 | 2.19.0 | Default, only mode | Targeted and tested |
+| 0.1.0 / 0.1.0 | Other 2.19 patch releases or other versions | None | Not claimed |
+
+`scrapy.__version__` and `scrapy.version_info` report the targeted **Scrapy API version**, not the
+SpiderOxide distribution version. Install matching `spideroxide` and `spideroxide-scrapy-compat`
+versions; the shim dependency enforces this. The target is pinned in the conformance manifest,
+the upstream test dependency, and the warning regression tests. There is no cross-version feature
+flag while only one Scrapy API version is supported; opt-in Twisted features and the repository's
+test-only coexistence override are not alternative version modes. A new compatibility target must
+declare an explicit mode, test it in CI alongside any still-supported mode, and document API
+differences before claiming support.
+
+Existing Scrapy 2.19 deprecated imports and aliases remain available with their documented
+warning category and message. Where compatible with the asyncio runtime, warning call sites
+match upstream 2.19.0. No deprecated alias is removed in a patch release. Before a breaking
+change or alias removal, first release a deprecation warning with a migration replacement, retain
+the old behavior for at least one subsequent released minor version, and document the removal
+and migration steps in the release notes and this matrix. Until that cycle is complete, projects
+can continue using the 2.19 mode. SpiderOxide 0.x releases may make breaking changes only at a
+minor version boundary; after 1.0, breaking changes require a major version.
+Retiring the 2.19 target requires an end-of-support notice in a released minor version, with its
+replacement target and migration steps. CI must continue exercising 2.19 through that notice
+period; removal takes effect only at a later minor (or post-1.0 major) release. No retirement date
+is currently set, and this policy does not extend upstream Scrapy's own maintenance window.
+
+CI compares warning classes, exact messages, and caller line numbers against Scrapy 2.19.0 and
+runs an upstream-generated Scrapy 2.19 project with both SpiderOxide backends. The separately
+configured published-release and previous-release upgrade jobs require release artifacts; there
+is no earlier SpiderOxide release yet, so a real installed-distribution version upgrade has not
+been certified. Existing project configuration migrations do not require a published artifact.
+For an existing project using the Python backend, disable `ROBOTSTXT_OBEY` or switch to the Rust
+backend; Scrapy-generated projects enable it by default and SpiderOxide's robots policy requires
+Rust.
+
 The compatibility target is Scrapy 2.19. The `spideroxide-scrapy-compat` distribution maps
 documented imports to SpiderOxide implementations without installing or importing upstream Scrapy.
 The version-pinned [`conformance` suite](../../conformance/README.md) compares supported public

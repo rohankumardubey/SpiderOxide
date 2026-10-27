@@ -18,6 +18,7 @@ from w3lib.encoding import html_to_unicode, read_bom
 from w3lib.html import get_base_url, strip_html5_whitespace
 from w3lib.url import safe_url_string
 
+from .exceptions import ScrapyDeprecationWarning
 from .headers import HeaderName, Headers, HeaderValues
 from .selectors import Selector, SelectorList
 
@@ -861,8 +862,8 @@ class FormRequest(Request):
         **kwargs: object,
     ) -> FormRequest:
         warnings.warn(
-            "FormRequest.from_response() is deprecated; prefer the form2request package",
-            DeprecationWarning,
+            "FormRequest.from_response() is deprecated. Use the form2request library instead.",
+            ScrapyDeprecationWarning,
             stacklevel=2,
         )
         if formcss is not None and formxpath is not None:
