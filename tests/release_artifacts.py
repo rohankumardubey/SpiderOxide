@@ -65,10 +65,43 @@ def _python_support(wheel: Path) -> None:
         raise ValueError(f"Unexpected Python support in {wheel.name}: {supported}")
 
 
-def assemble(artifacts: Path, output: Path) -> None:
-    version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+def _version() -> str:
+    return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "version"
     ]
+
+
+def verify_candidate(candidate: Path) -> None:
+    version = _version()
+    sdist = candidate / f"spideroxide-{version}.tar.gz"
+    compat = candidate / f"spideroxide_scrapy_compat-{version}-py3-none-any.whl"
+    expected = {sdist.name, compat.name, "SHA256SUMS"}
+    for platform in PLATFORMS.values():
+        prefix, architecture = platform
+        for python_version in VERSIONS:
+            python = python_version.replace(".", "")
+            wheel = _one(
+                candidate,
+                f"spideroxide-{version}-cp{python}-cp{python}-{prefix}*{architecture}.whl",
+            )
+            expected.add(wheel.name)
+            _wheel_tag(wheel, version, python, platform)
+            _verify_archives(wheel, compat, sdist)
+            _python_support(wheel)
+    _python_support(compat)
+    if {entry.name for entry in candidate.iterdir()} != expected or len(expected) != 28:
+        raise ValueError(f"Incomplete or unexpected release candidate inventory in {candidate}")
+    checksums = "\n".join(
+        f"{hashlib.sha256(file.read_bytes()).hexdigest()}  {file.name}"
+        for file in sorted(candidate.iterdir())
+        if file.name != "SHA256SUMS"
+    )
+    if (candidate / "SHA256SUMS").read_text(encoding="utf-8") != checksums + "\n":
+        raise ValueError(f"Release candidate checksums differ from files in {candidate}")
+
+
+def assemble(artifacts: Path, output: Path) -> None:
+    version = _version()
     sdist_dir = artifacts / "source-distribution"
     sdist = _one(sdist_dir, f"spideroxide-{version}.tar.gz")
     if set(sdist_dir.iterdir()) != {sdist}:
@@ -109,12 +142,22 @@ def assemble(artifacts: Path, output: Path) -> None:
         for file in sorted(output.iterdir())
     )
     (output / "SHA256SUMS").write_text(checksums + "\n", encoding="utf-8")
+    verify_candidate(output)
     print(f"Release candidate: {len(tags)} native wheels, one shim wheel, sdist, SHA256SUMS")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--artifacts", type=Path, required=True)
-    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--artifacts", type=Path)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--verify-candidate", type=Path)
     args = parser.parse_args()
-    assemble(args.artifacts, args.out)
+    if args.verify_candidate is not None:
+        if args.artifacts is not None or args.out is not None:
+            parser.error("--verify-candidate cannot be combined with --artifacts or --out")
+        verify_candidate(args.verify_candidate)
+        print(f"Verified release candidate in {args.verify_candidate}")
+    elif args.artifacts is not None and args.out is not None:
+        assemble(args.artifacts, args.out)
+    else:
+        parser.error("--artifacts and --out are both required when assembling")
