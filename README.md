@@ -134,7 +134,10 @@ To prepare a release, first create a version tag (for example `v0.1.0`) on the e
 whose **main-branch CI** run produced a successful `release-candidate` artifact. Dispatch
 **Prepare draft release** from `main` with that tag and CI run ID. It checks the tag/commit/run
 match, verifies all 27 artifact checksums and wheel contents, and smoke-tests the installed
-Linux CPython 3.10 wheels before creating a **draft** GitHub release. Review and publish the
+Linux CPython 3.10 wheels. If a previous published release exists, it also installs that
+release's wheels in a clean environment and upgrades to the candidate before creating a **draft**
+GitHub release. For the first release, this upgrade test is skipped; a real previous-version
+upgrade cannot be certified until there is an earlier published release. Review and publish the
 draft separately; the workflow neither creates tags nor publishes releases automatically.
 The Linux CPython 3.14 job also tests removing upstream Scrapy before installing the compatible
 `scrapy` namespace and command; this migration is separate from a previous-release upgrade.
