@@ -30,8 +30,8 @@ integration components and records the exact boundaries of each result on both e
   PeriodicLog, and StatsMailer
 - `scrapy.extensions.remote_control.RemoteControl`: asyncio-native, authenticated HTTP `/status`
   and explicitly opt-in `/execute` (see security notes below)
-- `scrapy.extensions.telnet.TelnetConsole`: import and configuration surface only; intentionally
-  does not bind a Telnet listener without Twisted reactor/Conch support (issue #48)
+- `scrapy.extensions.telnet.TelnetConsole`: opt-in, authenticated Twisted Conch manhole
+  bound exclusively to a numeric loopback address (see security notes below)
 - HTTP, file, data URI, FTP, and S3 download-handler class paths
 - Scheduler queue names, duplicate filters, request fingerprints, request serialization helpers,
   response dictionary round-tripping, spider discovery and selection, project settings loading,
@@ -70,9 +70,8 @@ format migration.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Twisted Telnet/Conch interactive console and its protocol/listener — issue #48
 - Non-asyncio reactors, full Twisted protocol internals, synchronous Scrapy signal-dispatch
-  `Failure` results, and Deferred-returning mail — issue #50
+  `Failure` results, and Deferred-returning mail
 - Third-party components beyond the tested certification boundaries
 
 APIs not exported by the shim fail to import instead of returning placeholders. The native
@@ -102,7 +101,8 @@ pinned Twisted integration tests. The reactor itself is not driven through Twist
 `run()`/`stop()` lifecycle, since that would stop the asyncio loop owned by SpiderOxide. Thus
 `reactor.running` remains false, reactor startup/shutdown triggers do not fire, and components
 requiring them are not certified. Timers, `deferToThread`, Deferred errors, cancellation, and
-timeouts are covered; browser execution and Telnet/Conch are not.
+timeouts are covered; browser execution is not. The Telnet console uses the asyncio reactor's
+TCP listener directly and does not require the reactor's global `run()` lifecycle.
 
 ### Local control
 
@@ -118,6 +118,30 @@ On platforms without POSIX owner/mode checks, the HTTP server is not configured.
 Job files are deleted, tokens invalidated, and the listener closed on crawl shutdown.
 Only grant filesystem access to trusted local users.
 
+The Telnet console also defaults to **off**. To enable it, install
+`spideroxide[twisted]`, set
+`TWISTED_REACTOR="twisted.internet.asyncioreactor.AsyncioSelectorReactor"`, and set
+`TELNETCONSOLE_ENABLED=True`. It uses Twisted Conch's authenticated interactive manhole on
+`127.0.0.1` (or `::1`); non-loopback hosts and hostnames are rejected. The default port range
+is 6023–6073; set `TELNETCONSOLE_PORT=[0]` to bind a random available port. With no
+`TELNETCONSOLE_PASSWORD`, a strong random password is generated and written with the selected
+port and username to a private 0600 job file in `$XDG_STATE_HOME/spideroxide/job_files` (or
+`~/.local/state/spideroxide/job_files`); `TELNETCONSOLE_JOBS_DIR` overrides that location.
+Generated credentials require POSIX ownership and mode checks; insecure or symlinked directories
+are rejected, the listener is closed on failure, and the file is removed on crawl shutdown.
+Alternatively set an explicit password of at least 16 characters, including on platforms
+without POSIX private files; explicit passwords are never written to a job file. Passwords are
+never logged. The listener is closed and existing clients disconnected at shutdown.
+
+Telnet is **plaintext**, including its password and the arbitrary Python code entered at the
+prompt. It must not be forwarded or exposed to a network, shared with untrusted local users, or
+enabled in a process running untrusted spiders. Console variables include `crawler`, `engine`,
+`spider`, `extensions`, `stats`, `settings`, `est`, `p`, and `prefs`; synchronous receivers of the
+`update_telnet_vars` signal may add variables. Unlike Scrapy's default console, SpiderOxide
+requires explicit opt-in and loopback binding, does not print passwords to logs, and requires
+strong explicit passwords. Invalid configuration fails crawler startup; the console's listener
+start/stop hooks are asynchronous and awaited during crawl lifecycle.
+
 `POST /execute` is absent unless both `REMOTE_CONTROL_ENABLED=True` and
 `REMOTE_CONTROL_EXECUTE_ENABLED=True`. Its `code` runs **arbitrary Python in the crawler
 process** with access to `crawler` and a per-server `stash`; only enable this for trusted
@@ -125,13 +149,11 @@ operators. `REMOTE_CONTROL_CODE_MAX_BYTES` defaults to 64 KiB; response output a
 limits default to 64 KiB and 16 KiB. Async code can be cancelled at an await point according
 to `REMOTE_CONTROL_TIMEOUT_DEFAULT` (30 seconds) and `REMOTE_CONTROL_TIMEOUT_MAX` (600
 seconds). Like Scrapy's remote control, synchronous blocking Python code cannot be interrupted
-by a timeout; neither endpoint is suitable for exposure to untrusted local users. The
-TelnetConsole constructor raises `NotConfigured` even when enabled, rather than offering a
-plaintext, unauthenticated substitute for Scrapy's Twisted manhole.
+by a timeout; neither endpoint is suitable for exposure to untrusted local users.
 
 AutoThrottle adjusts Python-engine download slots through its public delay hook. The Rust engine
 applies the same delay policy in its native slot manager; overriding AutoThrottle's `_adjust_delay`
-hook in a subclass does not change the Rust policy. Twisted-backed Telnet protocol methods remain unavailable until issue #48.
+hook in a subclass does not change the Rust policy.
 StatsMailer emits its deprecation warning when enabled rather than when its shim module is
 imported, since compatibility modules are registered eagerly.
 
@@ -142,7 +164,7 @@ items, statistics, and the close reason.
 `MailSender.send()` schedules delivery and returns an `asyncio.Task` instead of a Twisted
 `Deferred`. Await the task when the result matters; debug mode returns `None`. SMTP TLS uses
 verified certificates, unlike Scrapy's permissive legacy TLS context. Twisted reactor logging
-bridges and the full Deferred utility surface remain outside this subset (issue #50).
+bridges and the full Deferred utility surface remain outside this subset.
 
 The public Scrapy-named download exceptions inherit directly from `Exception`, as in Scrapy 2.19.
 SpiderOxide's additional `DownloadError` is a separate native exception; catching it alone does

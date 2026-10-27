@@ -905,8 +905,11 @@ crawl-rate logging, memory usage monitoring, close conditions, memory debugging,
 spider-state persistence. Configure them with `LOG_LEVEL`, `LOGSTATS_INTERVAL`, `MEMUSAGE_*`,
 `MEMDEBUG_ENABLED`, and `CLOSESPIDER_*`. `PeriodicLog` is opt-in through `EXTENSIONS` and supports
 boolean or `include`/`exclude` mappings through `PERIODIC_LOG_STATS` and `PERIODIC_LOG_DELTA`.
-Twisted-specific telnet support and deprecated mail-based stats notifications are intentionally
-not included.
+An authenticated, loopback-only Twisted Conch Telnet console is opt-in via
+`spideroxide[twisted]`, `TWISTED_REACTOR`, and `TELNETCONSOLE_ENABLED=True`; see the
+[security and credential guidance](compat/scrapy/COMPATIBILITY.md#local-control) before
+enabling this plaintext interactive shell. Deprecated mail-based stats notifications remain
+unsupported.
 
 ## Feed exports
 

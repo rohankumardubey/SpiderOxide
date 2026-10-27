@@ -40,7 +40,7 @@ Issues = "https://github.com/rohankumardubey/SpiderOxide/issues"
 
 [project.optional-dependencies]
 twisted = [
-    "Twisted>=24.11,<27",
+    "Twisted[conch]>=24.11,<27",
 ]
 remote-control = [
     "aiohttp>=3.9,<4",
