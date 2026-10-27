@@ -60,7 +60,7 @@ contract. A behavior change must:
 1. be implemented in both backends;
 2. include focused edge-case validation;
 3. pass the deterministic 10,000-request parity suite;
-4. be documented in the README;
+4. be documented in the README or the relevant guide in `docs/`;
 5. explain compatibility impact.
 
 ## Benchmark changes

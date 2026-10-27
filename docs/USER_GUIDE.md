@@ -1,0 +1,1177 @@
+# User guide
+
+[Back to overview](../README.md)
+
+**Explore:** [Crawling](#crawling) · [Settings and components](#settings-and-component-lifecycle) ·
+[Backends](#runtime-backends) · [Networking](#networking-configuration) ·
+[Persistent jobs](#persistent-jobs) · [Proxies](#proxy-support) ·
+[Feed exports](#feed-exports) · [Correctness](#correctness)
+
+## Where SpiderOxide fits in AI workflows
+
+AI applications need current, traceable source data. SpiderOxide can collect and export it without
+tying the crawl to a particular model or vector database:
+
+| Use case | Crawl output |
+| --- | --- |
+| Retrieval-augmented generation (RAG) | Documentation pages with source URLs and extracted text for a downstream chunking and indexing pipeline |
+| Domain-specific search | Structured listings or articles for a searchable index |
+| Monitoring and research | Repeated snapshots of public catalogs, prices, or notices for change analysis |
+
+**Pipeline:** permitted websites -> SpiderOxide spiders and pipelines -> JSON Lines or other feed
+exports -> your cleaning, indexing, and AI services. For example, the
+[`scrapy crawl catalog -O items.jsonl:jsonlines`](INSTALLATION.md#scrapy-compatible-imports)
+quick start exports structured records that a separate ingestion job can process. Include a source
+URL in each item and retain the collection time in your downstream records if freshness matters.
+
+Configure responsible crawl rates and `ROBOTSTXT_OBEY` as appropriate; review site terms, privacy,
+and content rights before collecting or using data for AI. Access to a page does not itself grant
+permission to train on its contents. SpiderOxide is not a browser automation tool or a built-in
+RAG/LLM pipeline, and its Scrapy compatibility is still evolving.
+
+## Crawling
+
+A spider defines its initial URLs and parses responses into requests or items.
+
+```python
+import asyncio
+
+from spideroxide import Crawler, Spider
+
+
+class ExampleSpider(Spider):
+    name = "example"
+    start_urls = ["https://example.com/"]
+
+    def parse(self, response):
+        for link in response.css("a"):
+            yield {
+                "text": link.xpath("string(.)").get(),
+                "href": link.css("::attr(href)").get(),
+            }
+
+
+result = asyncio.run(Crawler(ExampleSpider).crawl())
+print(result.items)
+print(result.stats)
+```
+
+`Spider.start()` may also be implemented as an asynchronous generator. Requests begin downloading
+as they are yielded, so startup does not need to finish before callbacks run.
+
+### Running and embedding crawlers
+
+Use `AsyncCrawlerRunner` (or its `CrawlerRunner` alias) to schedule crawls on an application's
+existing event loop. Crawls may run concurrently, and `join()` waits for every active crawler:
+
+```python
+import asyncio
+
+from spideroxide import AsyncCrawlerRunner
+
+
+async def crawl_all():
+    runner = AsyncCrawlerRunner({"CONCURRENT_REQUESTS": 32})
+    first = runner.crawl(ProductsSpider)
+    second = runner.crawl(PricesSpider)
+    await runner.join()
+    return first.result(), second.result()
+
+
+products, prices = asyncio.run(crawl_all())
+```
+
+`runner.stop()` gracefully asks all active engines to close and waits for their cleanup. Individual
+`Crawler` objects expose `stop_async()` for the same lifecycle. A crawler object is single-use;
+create a new one for every run. As a SpiderOxide extension, completed crawler and runner tasks
+resolve to `CrawlResult` instead of Scrapy's `None`; applications that only await completion behave
+unchanged, while callers may inspect exported items, crawl statistics, and the close reason.
+
+For a synchronous application entry point, `CrawlerProcess` owns its event loop and blocks in
+`start()` until all scheduled crawls finish:
+
+```python
+from spideroxide import CrawlerProcess
+
+process = CrawlerProcess({"CONCURRENT_REQUESTS": 32})
+process.crawl(ProductsSpider)
+process.crawl(PricesSpider)
+results = process.start()
+```
+
+Use a runner rather than a process when an event loop is already running. `SpiderLoader` discovers
+spiders recursively from `SPIDER_MODULES`, allowing `runner.crawl("spider-name")` in project-style
+applications. Scrapy-compatible projects can keep imports from `scrapy.crawler` and
+`scrapy.spiderloader`; SpiderOxide's orchestration is asyncio-native. An
+[opt-in asyncio-reactor bridge](../compat/scrapy/COMPATIBILITY.md#opt-in-twisted-bridge) accepts
+Deferred results at crawl extension points, but does not provide Twisted's full lifecycle.
+
+### Settings and component lifecycle
+
+`Settings` and `BaseSettings` preserve Scrapy 2.19 priorities and mutation rules. Values may come
+from mappings, `(name, value)` iterables, JSON objects, uppercase module attributes, or another
+settings object. Copies are deep, `frozencopy()` creates an immutable snapshot, and
+`copy_to_dict()` removes nested priority metadata for serialization:
+
+```python
+from spideroxide import Settings
+
+settings = Settings({"CONCURRENT_REQUESTS": 32})
+settings.setmodule("myproject.settings", priority="project")
+settings.set("CONCURRENT_REQUESTS", 8, priority="spider")
+
+runtime_settings = settings.frozencopy()
+print(runtime_settings.getint("CONCURRENT_REQUESTS"))  # 8
+```
+
+Spider `custom_settings` are applied at spider priority before extensions are constructed.
+Extensions receive mutable settings through `from_crawler()` and may finish runtime configuration;
+settings are frozen before download handlers, downloader middleware, spider middleware, and item
+pipelines are built. Component mappings use ascending priority, `None` disables inherited entries,
+and matching class objects or import paths replace existing entries.
+
+```python
+class AuditExtension:
+    @classmethod
+    def from_crawler(cls, crawler):
+        crawler.settings.set("AUDIT_ENABLED", True, priority="addon")
+        return cls()
+
+
+settings = Settings(
+    {
+        "EXTENSIONS": {AuditExtension: 100},
+        "DOWNLOADER_MIDDLEWARES": {
+            "myproject.middleware.LegacyMiddleware": None,
+            "myproject.middleware.TraceMiddleware": 200,
+        },
+    }
+)
+```
+
+Factories prefer `from_crawler(crawler, ...)` and otherwise call the class constructor. Returning
+`None` is a configuration error; raising `NotConfigured` cleanly disables that component. Under the
+Scrapy namespace, `get_project_settings()` loads uppercase values from `SCRAPY_SETTINGS_MODULE` and
+the supported `SCRAPY_*` project environment variables.
+
+### Add-ons and runtime services
+
+Scrapy 2.19 add-ons work unchanged through the `ADDONS` component-priority mapping. A runner calls
+`update_pre_crawler_settings()` before spider discovery, then each crawler constructs enabled
+add-ons and calls `update_settings()` before extensions and services are built. Add-on settings
+should use the `"addon"` priority so project and spider values can override them:
+
+```python
+class ObservabilityAddon:
+    @classmethod
+    def update_pre_crawler_settings(cls, settings):
+        settings.add_to_list("SPIDER_MODULES", "myproject.spiders")
+
+    def update_settings(self, settings):
+        settings.set("METRICS_ENABLED", True, priority="addon")
+        settings.setdefault_in_component_priority_dict(
+            "SERVICES",
+            MetricsService,
+            200,
+        )
+```
+
+`Crawler.get_addon()` exposes enabled instances. Raising `NotConfigured` from construction or
+`update_settings()` disables the add-on without aborting crawler startup.
+
+Runtime services are a SpiderOxide extension configured through `SERVICES`. They use the same
+component priorities and `from_crawler()` construction rules as Scrapy components. Optional
+`requires` class references define dependencies; services start in dependency order after settings
+freeze and the engine is constructed, then stop in reverse order after engine shutdown. Both hooks
+may be synchronous or asynchronous:
+
+```python
+class DatabaseService:
+    async def start(self): ...
+
+    async def stop(self): ...
+
+
+class IndexService:
+    requires = (DatabaseService,)
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        database = crawler.get_service(DatabaseService)
+        return cls(database)
+
+
+SERVICES = {
+    IndexService: 100,
+    DatabaseService: 200,
+}
+```
+
+Dependency order takes precedence over numeric priority. Missing dependencies and dependency cycles
+fail before the engine starts, and partial startup failures stop already-running services.
+
+## Feed and sitemap spiders
+
+`SitemapSpider`, `XMLFeedSpider`, and `CSVFeedSpider` follow Scrapy 2.19 callback and override
+contracts. Sitemap crawls support `robots.txt` discovery, nested and gzip-compressed maps,
+alternate-language links, filters, and regex callback routing:
+
+```python
+from spideroxide import SitemapSpider
+
+
+class CatalogSpider(SitemapSpider):
+    name = "catalog"
+    sitemap_urls = ["https://example.com/robots.txt"]
+    sitemap_rules = [(r"/products/", "parse_product")]
+    sitemap_follow = [r"/catalog-"]
+    sitemap_alternate_links = True
+
+    def parse_product(self, response):
+        return {"url": response.url}
+```
+
+Feed spiders expose `adapt_response`, `process_results`, and row or node parsing hooks:
+
+```python
+from spideroxide import CSVFeedSpider, XMLFeedSpider
+
+
+class ProductXMLSpider(XMLFeedSpider):
+    name = "product-xml"
+    start_urls = ["https://example.com/products.xml"]
+    itertag = "product"
+
+    def parse_node(self, response, selector):
+        return {"name": selector.xpath("name/text()").get()}
+
+
+class ProductCSVSpider(CSVFeedSpider):
+    name = "product-csv"
+    start_urls = ["https://example.com/products.csv"]
+
+    def parse_row(self, response, row):
+        return row
+```
+
+Projects using the compatibility distribution may keep the corresponding
+`from scrapy.spiders import ...` imports unchanged.
+
+## Items and Item Loaders
+
+`Item` provides a mapping with an explicit field schema. `Field` metadata can configure loader input
+and output processors, serializers, or application-specific values. Undeclared fields raise
+`KeyError`, which catches schema mistakes before items reach pipelines or feed exporters.
+
+```python
+from spideroxide import Field, Item, ItemLoader, Join, MapCompose, TakeFirst
+
+
+class Product(Item):
+    name = Field(input_processor=MapCompose(str.strip), output_processor=TakeFirst())
+    price = Field(input_processor=MapCompose(float), output_processor=TakeFirst())
+    tags = Field(output_processor=Join(","))
+
+
+def parse_product(response):
+    loader = ItemLoader(item=Product(), response=response)
+    loader.add_css("name", "h1::text")
+    loader.add_css("price", ".price::attr(data-value)")
+    loader.add_value("tags", ["catalog", "featured"])
+    return loader.load_item()
+```
+
+Loaders support direct values, CSS, XPath, and JMESPath extraction; add and replace operations;
+nested selectors; loader contexts; and per-loader, per-field, or default processors. `MapCompose`,
+`Compose`, `TakeFirst`, `Join`, `Identity`, and `SelectJmes` follow the Item Loaders processing
+contract. The shared `ItemAdapter` also supports dictionaries, dataclasses, attrs classes, and
+Pydantic models, so those item types use the same loader and pipeline path.
+
+## File and image pipelines
+
+`FilesPipeline` and `ImagesPipeline` download media yielded in item URL fields without sending those
+requests through the scheduler. Downloads still pass through downloader middleware, including
+cookies, redirects, retries, proxies, caching, and native download slots. Requests with the same
+fingerprint share one crawl-lifetime result, including failures.
+
+```python
+from spideroxide import Spider
+
+
+class ProductSpider(Spider):
+    name = "products"
+    start_urls = ["https://example.com/products"]
+
+    def parse(self, response):
+        yield {
+            "file_urls": ["https://example.com/manual.pdf"],
+            "image_urls": ["https://example.com/photo.png"],
+        }
+
+
+settings = {
+    "ITEM_PIPELINES": {
+        "spideroxide.pipelines.FilesPipeline": 100,
+        "spideroxide.pipelines.ImagesPipeline": 200,
+    },
+    "FILES_STORE": "downloads/files",
+    "IMAGES_STORE": "downloads/images",
+    "IMAGES_THUMBS": {"small": (120, 120)},
+}
+```
+
+Files are stored under `full/<sha1><extension>`. Images are validated, EXIF-transposed, converted to
+RGB JPEG when needed, and stored under `full/<sha1>.jpg`; thumbnails use
+`thumbs/<name>/<sha1>.jpg`. Results contain `url`, `path`, `checksum`, and a `downloaded`, `cached`,
+or `uptodate` status. Local persistence, atomic replacement, MD5 checksums, and freshness metadata
+are handled by `NativeMediaStore`.
+
+Media stores also accept `s3://`, `gs://`, and `ftp://` URIs. Remote objects retain the same
+deterministic paths, freshness checks, checksums, image dimensions, content types, and cache-control
+metadata as local media:
+
+```python
+settings = {
+    "FILES_STORE": "s3://crawler-media/files",
+    "IMAGES_STORE": "gs://crawler-media/images",
+    "FILES_STORE_S3_ACL": "private",
+    "IMAGES_STORE_GCS_ACL": "",
+}
+```
+
+S3 uses the shared `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`,
+`AWS_ENDPOINT_URL`, `AWS_REGION_NAME`, `AWS_USE_SSL`, and `AWS_VERIFY` settings. GCS uses
+`GCS_PROJECT_ID`. FTP credentials may be included in the URI or supplied through `FTP_USER` and
+`FTP_PASSWORD`; `FEED_STORAGE_FTP_ACTIVE` selects active mode. Install
+`spideroxide[remote-media]`, `spideroxide[s3]`, or `spideroxide[gcs]` for cloud storage.
+
+Set `FILES_URLS_FIELD`, `FILES_RESULT_FIELD`, `FILES_EXPIRES`, `IMAGES_URLS_FIELD`,
+`IMAGES_RESULT_FIELD`, `IMAGES_EXPIRES`, `IMAGES_MIN_WIDTH`, `IMAGES_MIN_HEIGHT`, and
+`IMAGES_THUMBS` to customize behavior. Redirects are rejected by default; enable
+`MEDIA_ALLOW_REDIRECTS` when media endpoints redirect. Image support requires
+`pip install "spideroxide[images]"`.
+
+## Runtime backends
+
+The HTTPX downloader is the default. Select the native Rust downloader explicitly:
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={"DOWNLOADER_BACKEND": "rust"},
+    ).crawl()
+)
+```
+
+The native downloader uses a shared Reqwest connection pool, Rustls, streamed response bodies,
+automatic decompression, and the same timeout, response-size, redirect, header, cookie, and response
+contracts as the Python downloader. Use `auto` to prefer Rust and fall back to HTTPX when the native
+extension is unavailable.
+
+The Python crawl engine is also the default. The native engine moves priority scheduling, duplicate
+filtering, concurrency admission, worker wakeups, start-request backpressure, idle detection, retry
+decisions, robots policy state, and downloader attempt statistics into Rust. Spider callbacks,
+middleware, pipelines, signals, and item objects remain in Python.
+
+Select the complete native runtime explicitly:
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "DOWNLOADER_BACKEND": "rust",
+        },
+    ).crawl()
+)
+```
+
+`ENGINE_BACKEND` accepts `python`, `rust`, or `auto`. `ENGINE_MAX_PENDING` bounds queued start
+requests and defaults to twice `CONCURRENT_REQUESTS` when set to `0`.
+
+## Networking configuration
+
+The HTTPX and Rust downloaders share the same DNS, TLS, connection, and response-integrity
+settings:
+
+| Setting | Purpose |
+|---|---|
+| `DNS_RESOLVER` | Select IPv4-only `CachingThreadedResolver` or IPv4/IPv6 `CachingHostnameResolver` behavior |
+| `DNSCACHE_ENABLED`, `DNSCACHE_SIZE`, `DNS_TIMEOUT` | Control bounded DNS caching and lookup timeouts |
+| `DOWNLOAD_BIND_ADDRESS` | Bind outbound TCP connections to a local address |
+| `DOWNLOAD_VERIFY_CERTIFICATES` | Enable server certificate and hostname verification |
+| `DOWNLOADER_CLIENTCONTEXTFACTORY` | Select Scrapy's permissive or browser-like verifying TLS policy |
+| `DOWNLOAD_TLS_MIN_VERSION`, `DOWNLOAD_TLS_MAX_VERSION` | Restrict accepted TLS protocol versions |
+| `DOWNLOADER_CLIENT_TLS_CIPHERS` | Configure OpenSSL ciphers for the HTTPX backend; the Rust backend currently accepts Scrapy's `DEFAULT` value |
+| `DOWNLOADER_CLIENT_CERTIFICATE`, `DOWNLOADER_CLIENT_KEY` | Load a PEM client identity for mutual TLS; Rust requires an unencrypted private key |
+| `DOWNLOADER_CLIENT_TLS_VERBOSE_LOGGING` | Log negotiated TLS protocol and cipher diagnostics |
+| `HTTPX_HTTP2_ENABLED` | Allow HTTP/2 negotiation; disabled by default for Scrapy compatibility |
+| `DOWNLOAD_FAIL_ON_DATALOSS` | Raise `ResponseDataLossError` for truncated response bodies |
+
+> [!WARNING]
+> For Scrapy 2.19 compatibility, `DOWNLOAD_VERIFY_CERTIFICATES` defaults to `False`. This accepts
+> untrusted and hostname-mismatched certificates. Set it to `True` for production crawls unless
+> certificate verification is intentionally handled by an isolated test environment.
+
+Responses expose the negotiated HTTP protocol, peer IP address, and leaf certificate when the
+transport provides them. DNS failures, connection refusals, unsupported schemes, timeouts,
+truncated bodies, and size cancellations use the same public exception types across both
+downloaders. Per-request `download_timeout` and `download_fail_on_dataloss` metadata override their
+global settings.
+
+## CrawlSpider and link extraction
+
+`LinkExtractor` and `LxmlLinkExtractor` provide Scrapy-compatible URL, domain, extension, text,
+tag, attribute, CSS, and XPath filtering. Full valid HTML documents use the native Rust parser for
+candidate extraction. Restricted regions and malformed documents use the lxml-backed compatibility
+path so observable results remain stable.
+
+```python
+from spideroxide import CrawlSpider, LinkExtractor, Rule
+
+
+class CatalogSpider(CrawlSpider):
+    name = "catalog"
+    start_urls = ["https://example.com/catalog"]
+    rules = (
+        Rule(
+            LinkExtractor(
+                allow=r"/products/",
+                allow_domains="example.com",
+                restrict_css="main",
+            ),
+            callback="parse_product",
+            follow=True,
+        ),
+    )
+
+    async def parse_product(self, response):
+        return {
+            "url": response.url,
+            "name": response.css("h1::text").get(),
+        }
+```
+
+Rules support callback and errback method names, callback keyword arguments, `process_links`,
+`process_request`, recursive following, and the `CRAWLSPIDER_FOLLOW_LINKS` setting. Generated
+requests retain their rule index and link text in request metadata and remain serializable through
+`JOBDIR`.
+
+## Spider middleware
+
+Configure spider middleware with `SPIDER_MIDDLEWARES`. Lower priority components receive responses
+first through `process_spider_input`. Output and exception hooks run in reverse order. Both crawl
+engines support synchronous and asynchronous hooks, including the asynchronous
+`process_spider_output_async` hook and streaming `process_start` hook.
+
+```python
+class AuditMiddleware:
+    async def process_start(self, start):
+        async for output in start:
+            yield output
+
+    def process_spider_input(self, response, spider):
+        spider.logger.info("Parsing %s", response.url)
+
+    def process_spider_output(self, response, result, spider):
+        yield from result
+
+    def process_spider_exception(self, response, exception, spider):
+        return None
+
+
+settings = {
+    "SPIDER_MIDDLEWARES": {
+        AuditMiddleware: 500,
+    },
+}
+```
+
+The legacy `process_start_requests` hook remains supported for spiders that use the default
+synchronous `start_requests()` source while the middleware chain remains synchronous. Middleware
+consuming a custom asynchronous `Spider.start()` or following a modern `process_start`
+transformation must implement `process_start` instead.
+
+Request errbacks receive failures from spider input and callbacks before spider exception
+middleware. Successful errback output then passes through spider output middleware. Output
+middleware failures skip request errbacks and continue at the next eligible spider exception hook.
+Items yielded before a callback or middleware generator fails are retained and continue through the
+remaining middleware chain.
+
+### Built-in middleware
+
+The default middleware stack follows Scrapy's ordering and override rules. Downloader middleware
+includes off-site filtering, HTTP authentication, per-request download timeouts, default headers,
+user agents, retries, meta-refresh and HTTP redirects, HTTP compression, cookies, proxies, byte
+statistics, and caching. Spider middleware marks start requests, filters unhandled HTTP statuses,
+applies referrer policies, rejects overlong URLs, tracks depth, and warns about copied internal
+request metadata.
+
+Every default can be disabled or replaced through `DOWNLOADER_MIDDLEWARES` or
+`SPIDER_MIDDLEWARES`. Request metadata remains authoritative: `download_timeout`,
+`download_maxsize`, `allow_offsite`, `handle_httpstatus_list`, `handle_httpstatus_all`, and
+`referrer_policy` override their corresponding defaults for one request. `HTTPAUTH_DOMAIN`
+restricts settings-level credentials, while per-request `http_user`, `http_pass`, and
+`http_auth_domain` provide isolated overrides. Redirects regenerate `Referer` using the active
+referrer policy.
+
+Both HTTP backends consume raw compressed response bodies during crawls so
+`HttpCompressionMiddleware` owns decompression, size enforcement, and statistics consistently.
+Standalone `HttpxDownloader` and `RustDownloader` instances retain their existing transparent
+compression behavior.
+
+## Cookies
+
+Cookie handling is enabled by default through `CookiesMiddleware`. Native cookie jars apply
+Scrapy-compatible domain, path, secure, expiration, and public-suffix rules for both downloader
+backends. Downloader clients remain stateless, so cookies cannot leak around middleware jar
+selection or bypass rules.
+
+```python
+yield Request(
+    "https://example.com/account",
+    cookies={"session": "value"},
+    meta={"cookiejar": "account"},
+)
+```
+
+`Request.cookies` accepts a name and value mapping or Scrapy's verbose cookie list with `name`,
+`value`, `domain`, `path`, and `secure` fields. Use the same `cookiejar` metadata value on later
+requests to keep an isolated session. Metadata is not copied automatically when following links.
+Set `dont_merge_cookies` to bypass both stored and request cookies while preserving a manually
+provided `Cookie` header. Set `COOKIES_ENABLED` to `False` to disable middleware processing, or
+enable `COOKIES_DEBUG` to log sent and received cookie headers.
+
+## HTTP cache
+
+Enable persistent response caching with `HTTPCACHE_ENABLED`. The default `DummyPolicy` reuses every
+stored response except ignored schemes and status codes. `RFC2616Policy` honors HTTP freshness,
+validators, `Cache-Control`, `Date`, `Age`, `Expires`, and `Last-Modified`; stale entries are
+revalidated with conditional request headers and may recover eligible server or download failures.
+
+```python
+settings = {
+    "HTTPCACHE_ENABLED": True,
+    "HTTPCACHE_DIR": ".cache/http",
+    "HTTPCACHE_POLICY": "spideroxide.httpcache.RFC2616Policy",
+    "HTTPCACHE_EXPIRATION_SECS": 86400,
+}
+```
+
+`NativeHttpCacheStorage` keeps each spider's cache in a SQLite WAL database. Cache keys use the
+native request fingerprint, so the method, canonical URL, and request body participate in identity.
+Response URLs, status codes, bodies, and repeated headers survive process restarts. The standard
+response type is reconstructed from the cached metadata, and cache hits include `cached` in
+`Response.flags`.
+
+The supported compatibility settings are `HTTPCACHE_STORAGE`, `HTTPCACHE_IGNORE_HTTP_CODES`,
+`HTTPCACHE_IGNORE_MISSING`, `HTTPCACHE_IGNORE_SCHEMES`, `HTTPCACHE_ALWAYS_STORE`, and
+`HTTPCACHE_IGNORE_RESPONSE_CACHE_CONTROLS`. Set request metadata `dont_cache` to bypass lookup and
+storage. `HTTPCACHE_GZIP` and `HTTPCACHE_DBM_MODULE` are accepted for settings compatibility but do
+not change native SQLite storage.
+
+## Scheduler queues
+
+Both crawl engines support Scrapy's built-in FIFO and LIFO queue settings. Normal requests use LIFO
+queues by default, while start requests use separate FIFO queues. Higher priorities are dequeued
+first. At equal priority, normal requests are dequeued before start requests.
+
+```python
+settings = {
+    "SCHEDULER_MEMORY_QUEUE": "scrapy.squeues.FifoMemoryQueue",
+    "SCHEDULER_DISK_QUEUE": "scrapy.squeues.PickleFifoDiskQueue",
+    "SCHEDULER_START_MEMORY_QUEUE": None,
+    "SCHEDULER_START_DISK_QUEUE": None,
+}
+```
+
+Setting both start queue values to `None` places start requests in the normal queues. The disk
+settings apply to serializable requests stored through `JOBDIR`. Memory-only requests are dequeued
+before persisted requests, matching Scrapy. Marshal and Pickle FIFO and LIFO disk queue paths are
+accepted. Unsupported custom queue classes fail during engine construction instead of being
+silently approximated.
+
+The public `Scheduler` component retains FIFO ties by default so existing component benchmarks and
+standalone callers keep their established behavior. Crawl engines use the Scrapy-compatible settings
+above.
+
+## Persistent jobs
+
+Set `JOBDIR` with the Rust engine to make a crawl resumable. The native coordinator stores queued
+and in-flight requests, duplicate fingerprints, priorities, sequence numbers, start-request
+classification, and spider state in a locked SQLite WAL. A restarted crawler restores the frontier
+before it begins producing new start requests.
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "DOWNLOADER_BACKEND": "rust",
+            "JOBDIR": "crawls/example-1",
+        },
+    ).crawl()
+)
+```
+
+`ENGINE_BACKEND="auto"` also selects the native engine when `JOBDIR` is configured and does not
+fall back to the Python engine. Only one crawler may own a job directory at a time. Reusing a
+directory for a different spider or running two processes against it is unsupported.
+
+Serializable requests survive normal cancellation, process termination, and in-flight interruption.
+Callback and errback functions must be bound methods of the running spider so they can be restored
+by name. Request headers, bodies, cookies, metadata, callback keyword arguments, flags, duplicate
+decisions, arbitrary-size priorities, and configured queue order are retained.
+
+When a request cannot be serialized, it remains in memory for the current process and increments
+`scheduler/unserializable`, matching Scrapy's fallback behavior. Set `SCHEDULER_DEBUG=True` to log
+the first such request. Memory-only requests do not survive interruption.
+
+With `JOBDIR` enabled, `spider.state` is a dictionary restored before the crawl starts and saved
+after the spider closes. The directory contains Python pickle payloads for user-defined request
+values, so it must be treated with the same trust as source code. Start a new job directory after
+changing incompatible callback names or upgrading across incompatible SpiderOxide versions.
+
+SpiderOxide also performs a one-time, source-preserving import when `JOBDIR` contains a Scrapy 2.19
+layout but no `job.sqlite3`. The import supports Scrapy's standard priority queue with Pickle or
+Marshal FIFO/LIFO disk queues, separate start-request queues, 20-byte request fingerprints,
+protocol-4 `spider.state`, and the built-in `Request`, `FormRequest`, and `JsonRequest` classes.
+Callbacks and errbacks are resolved by name against the running spider.
+
+The compatibility boundary is explicit:
+
+| Producer | Reader | Contract |
+|---|---|---|
+| SpiderOxide | SpiderOxide | Native SQLite schemas 1-3 are readable; older native schemas migrate to schema 3 |
+| Scrapy 2.19 | SpiderOxide | Supported standard layouts are copied atomically into schema 3 and marked with migration version 1 |
+| SpiderOxide | Scrapy 2.19 | Not supported; SpiderOxide writes only its native SQLite format |
+
+Scrapy source files are never deleted or rewritten, so they remain an unchanged downgrade snapshot;
+they do not receive progress made after SpiderOxide starts. Reopening the directory in SpiderOxide
+uses only `job.sqlite3`. A directory containing unmarked native and Scrapy state is rejected as
+ambiguous. Custom priority queues, custom request classes, unsupported fingerprint lengths,
+missing callback methods, and truncated or malformed files also fail before migration writes
+`job.sqlite3`.
+
+## Proxy support
+
+SpiderOxide enables a Scrapy-compatible `HttpProxyMiddleware` by default. Set `proxy` in request
+metadata to route one request through an HTTP, HTTPS, SOCKS4, SOCKS4a, SOCKS5, or SOCKS5h proxy:
+
+```python
+from spideroxide import Request
+
+
+request = Request(
+    "https://example.com/private",
+    meta={"proxy": "http://username:password@proxy.example.com:8080"},
+)
+```
+
+SOCKS proxies use the same `proxy` metadata key; for example, use a `socks5h://` URL when DNS
+resolution must happen at the proxy.
+
+Proxy credentials are removed from the normalized metadata URL and sent only as proxy
+authentication. Redirected and retried requests retain the selected proxy. Set
+`request.meta["proxy"]` to `None` to bypass proxy discovery for one request.
+
+`socks4://` and `socks5://` resolve destination names locally. Use `socks4a://` or `socks5h://`
+when destination DNS must be resolved by the proxy. SOCKS5 username/password authentication is
+supported; SOCKS4 authentication is rejected consistently by both downloaders.
+
+When no explicit proxy is present, SpiderOxide discovers standard `http_proxy`, `https_proxy`,
+`all_proxy`, and `no_proxy` configuration from the environment and operating system. Set
+`HTTPPROXY_ENABLED` to `False` to disable this behavior. `HTTPPROXY_AUTH_ENCODING` controls HTTP
+Basic authentication encoding and defaults to `latin-1`.
+
+Both downloaders pool connections separately for each proxy and authentication identity. The Rust
+downloader owns its Reqwest proxy-client pool and applies HTTP `Proxy-Authorization` at the proxy
+layer so credentials are not forwarded to direct target servers. SOCKS credentials are kept out of
+the normalized proxy URL, target request headers, error messages, and statistics.
+
+## Logging and mail
+
+Set `LOG_FORMATTER` to a `LogFormatter` subclass to control crawler, item, and error records.
+Formatter methods return a dictionary with `level`, `msg`, and `args`, or `None` to omit a
+record. `DEFAULT_DROPITEM_LOG_LEVEL` is `WARNING`; individual `DropItem` exceptions may set
+`log_level` to override it. The Python and Rust crawl engines use the same formatter.
+
+The deprecated `scrapy.mail.MailSender` import remains available with a
+`ScrapyDeprecationWarning`. SpiderOxide sends SMTP mail without a Twisted reactor using
+`spideroxide.mail.MailSender`; its `send()` method schedules delivery as an `asyncio.Task`
+instead of returning a Deferred. Await that task to observe failures and ensure delivery before
+the event loop closes. `MAIL_HOST`, `MAIL_FROM`, `MAIL_USER`, `MAIL_PASS`, `MAIL_PORT`, `MAIL_TLS`,
+and `MAIL_SSL` configure the sender. SMTP TLS validates server certificates and hostnames.
+
+## Extensions
+
+Extensions are configured through the Scrapy-compatible `EXTENSIONS` setting. Values are numeric
+priorities, and lower values are initialized first. Each extension can define `from_crawler()` to
+read settings, retain crawler services, and connect synchronous or asynchronous signal handlers.
+
+```python
+from spideroxide import signals
+
+
+class ItemCounterExtension:
+    @classmethod
+    def from_crawler(cls, crawler):
+        extension = cls()
+        extension.count = 0
+        crawler.signals.connect(extension.item_scraped, signals.item_scraped)
+        return extension
+
+    def item_scraped(self, item, spider):
+        self.count += 1
+
+
+settings = {
+    "EXTENSIONS": {
+        ItemCounterExtension: 500,
+    },
+}
+```
+
+Extension references may be classes, import paths, or existing instances. Raising `NotConfigured`
+from a factory skips that extension. `EXTENSIONS_BASE` provides framework defaults, and assigning
+`None` to the same reference in `EXTENSIONS` disables a base extension. Loaded instances are
+available from `crawler.extensions`, including iteration and `get_by_type()` inspection.
+
+Extensions receive the same engine, spider, request, response, item, and error signals on both crawl
+engines. With the Rust engine selected, scheduling and runtime policy state remain in Rust while
+extensions run as Python observers through the public signal API.
+
+Signal coverage includes engine and spider lifecycle, scheduler state, downloader entry and exit,
+raw response downloads, response headers and body chunks, robots policy parsing, item success,
+drops and errors, and feed export events. Scheduling receivers can raise `IgnoreRequest` to reject a
+request before insertion. Idle receivers can raise `DontCloseSpider` to keep the crawl alive while
+adding more work.
+
+`headers_received` and `bytes_received` are synchronous transport signals. Raising
+`StopDownload(fail=True)` stops the transfer and routes its partial response to the request errback;
+`StopDownload(fail=False)` routes it to the normal callback. In both cases the partial response
+includes `download_stopped` in `Response.flags`. The Python and Rust downloaders expose the same
+observable behavior.
+
+The default operational extensions provide Scrapy-compatible core and log counters, periodic
+crawl-rate logging, memory usage monitoring, close conditions, memory debugging, and `JOBDIR`
+spider-state persistence. Configure them with `LOG_LEVEL`, `LOGSTATS_INTERVAL`, `MEMUSAGE_*`,
+`MEMDEBUG_ENABLED`, and `CLOSESPIDER_*`. `PeriodicLog` is opt-in through `EXTENSIONS` and supports
+boolean or `include`/`exclude` mappings through `PERIODIC_LOG_STATS` and `PERIODIC_LOG_DELTA`.
+An authenticated, loopback-only Twisted Conch Telnet console is opt-in via
+`spideroxide[twisted]`, `TWISTED_REACTOR`, and `TELNETCONSOLE_ENABLED=True`; see the
+[security and credential guidance](../compat/scrapy/COMPATIBILITY.md#local-control) before
+enabling this plaintext interactive shell. Deprecated mail-based stats notifications remain
+unsupported.
+
+## Feed exports
+
+Configure one or more streaming outputs with Scrapy's `FEEDS` setting. SpiderOxide supports plain
+filesystem paths, `file://` URIs, `pathlib.Path` keys, `stdout:`, FTP, Amazon S3, and Google Cloud
+Storage. Built-in formats are `json`, `jsonlines` with the `jsonl` and `jl` aliases, `csv`, and
+`xml`.
+
+```python
+settings = {
+    "FEEDS": {
+        "exports/%(name)s-%(time)s.jl": {
+            "format": "jsonlines",
+            "encoding": "utf-8",
+            "fields": ["url", "title"],
+            "overwrite": True,
+        },
+        "exports/%(name)s-%(batch_id)03d.csv": {
+            "format": "csv",
+            "fields": {
+                "url": "URL",
+                "title": "Title",
+            },
+            "batch_item_count": 10_000,
+            "overwrite": True,
+        },
+        "s3://crawler-results/%(name)s/items.jl.gz": {
+            "format": "jsonlines",
+            "overwrite": True,
+            "postprocessing": [
+                "spideroxide.feedpostprocessing.GzipPlugin",
+            ],
+            "gzip_compresslevel": 6,
+        },
+    },
+}
+```
+
+URI templates provide spider attributes plus `time`, `batch_time`, and `batch_id`. Batched feeds
+must include `%(batch_id)` or `%(batch_time)s` so each batch has a distinct target. Feed options can
+override `fields`, `encoding`, `indent`, `store_empty`, `overwrite`, `uri_params`,
+`item_export_kwargs`, `item_classes`, and `item_filter`. The matching global defaults are
+`FEED_EXPORT_FIELDS`, `FEED_EXPORT_ENCODING`, `FEED_EXPORT_INDENT`, `FEED_STORE_EMPTY`,
+`FEED_EXPORT_BATCH_ITEM_COUNT`, and `FEED_URI_PARAMS`.
+
+Filesystem feeds append by default for Scrapy compatibility. Set `overwrite` to `True` when each
+crawl should replace the previous output. Export completion is observable through
+`signals.feed_slot_closed` and `signals.feed_exporter_closed`; storage outcomes are recorded under
+`feedexport/success_count/<Storage>` and `feedexport/failed_count/<Storage>`.
+
+Remote feeds use temporary local files and upload them outside the event loop. Configure the
+temporary directory with `FEED_TEMPDIR` and bound simultaneous uploads with
+`FEED_STORAGE_CONCURRENCY`, which defaults to four. FTP and FTPS credentials may be embedded in the
+URI, `FEED_STORAGE_FTP_ACTIVE` selects active mode, and FTPS verifies the server certificate and
+protects the data channel. S3 uses the standard AWS credential chain or the
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ENDPOINT_URL`, and
+`AWS_REGION_NAME` settings. Set `AWS_MAX_POOL_CONNECTIONS` to override the S3 connection-pool size;
+otherwise it follows `REACTOR_THREADPOOL_MAXSIZE`. GCS uses application default credentials and
+`GCS_PROJECT_ID`. Optional object ACLs come from `FEED_STORAGE_S3_ACL` and
+`FEED_STORAGE_GCS_ACL`.
+
+Use `stdout:` as a feed URI to write directly to standard output without closing it. Install S3
+support with `pip install "spideroxide[s3]"`, GCS support with
+`pip install "spideroxide[gcs]"`, or both with `pip install "spideroxide[remote-feeds]"`. FTP and
+the built-in postprocessors require no additional dependencies. Add `GzipPlugin`, `Bz2Plugin`, or
+`LZMAPlugin` to a feed's `postprocessing` list and pass the matching `gzip_*`, `bz2_*`, or `lzma_*`
+options to control compression.
+
+Custom formats and destinations can be registered through `FEED_EXPORTERS` and `FEED_STORAGES`.
+The exporter runs as a Python extension because it serializes user-defined item types, while both
+crawl engines retain their existing runtime ownership.
+
+## HTTP models
+
+SpiderOxide provides Scrapy-compatible `Request`, `FormRequest`, and `JsonRequest` classes. Requests
+support Unicode URL quoting, text or byte bodies, repeated headers, callbacks, errbacks, metadata,
+callback keyword arguments, flags, copying, replacement, dictionary serialization, and common curl
+commands.
+
+```python
+from spideroxide import FormRequest, JsonRequest, Request
+
+
+page = Request.from_curl("curl https://example.com/private -u user:secret -H 'X-Trace: crawl'")
+login = FormRequest(
+    "https://example.com/login",
+    formdata={"username": "reader", "password": "secret"},
+)
+api = JsonRequest(
+    "https://example.com/api/items",
+    data={"limit": 100, "active": True},
+)
+```
+
+`Response`, `TextResponse`, `HtmlResponse`, and `XmlResponse` provide copy and replacement helpers,
+request metadata, callback keyword arguments, URL joining, `follow()`, and `follow_all()`.
+`TextResponse.follow_all()` accepts URL iterables, CSS expressions, XPath expressions, and selector
+lists. `FormRequest.from_response()` supports common HTML form controls and explicit submit-button
+selection.
+
+The downloader selects response subclasses from `Content-Type`, URL extensions, and conservative
+body inspection. Built-in request subclasses retain their type and configuration when restored from
+`JOBDIR`.
+
+## Download handlers
+
+SpiderOxide dispatches downloads by URL scheme through `DownloadHandlers`. HTTP and HTTPS use the
+selected Python or Rust downloader backend. The built-in handlers also support RFC 2397 `data:`
+URLs, local `file:` URLs, FTP downloads, and anonymous or signed S3 downloads.
+
+Customize handlers with `DOWNLOAD_HANDLERS`. Entries override `DOWNLOAD_HANDLERS_BASE`, and a
+`None` value disables a scheme:
+
+```python
+from spideroxide import TextResponse
+
+
+class ApiDownloadHandler:
+    lazy = True
+
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls()
+
+    async def download_request(self, request):
+        return TextResponse(request.url, body=b"custom response", request=request)
+
+    async def close(self):
+        pass
+
+
+settings = {
+    "DOWNLOAD_HANDLERS": {
+        "api": ApiDownloadHandler,
+        "file": None,
+    }
+}
+```
+
+Handlers may be classes or import paths. Non-lazy handlers are initialized when a crawl starts;
+lazy handlers are initialized on their first request. Initialized handlers are closed when the
+crawl ends. Requests for disabled or unknown schemes raise `NotSupported` through the normal
+downloader middleware exception path.
+
+FTP credentials default to `FTP_USER` and `FTP_PASSWORD` and can be overridden per request with
+`ftp_user`, `ftp_password`, and `ftp_passive` metadata. Set `ftp_local_filename` to stream the
+download to a local file. S3 downloads require the `s3` optional dependency:
+
+```bash
+python -m pip install "spideroxide[s3]"
+```
+
+When AWS credentials are unset, S3 requests are anonymous. `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, and `AWS_SESSION_TOKEN` enable signed requests.
+
+`file:` and `data:` URLs can expose local or embedded content. Disable either handler when crawl
+inputs are untrusted and those schemes are not required.
+
+## Selectors
+
+`TextResponse` provides the familiar Scrapy selector API through Parsel, the same selector library
+used by Scrapy. CSS and XPath expressions can be chained and mixed, including `::text`,
+`::attr(...)`, regular expressions, namespaces, and `get()` or `getall()` extraction.
+
+```python
+def parse(self, response):
+    for product in response.css("article.product"):
+        yield {
+            "name": product.css("h2::text").get(),
+            "price": product.xpath(".//span[@class='price']/text()").get(),
+        }
+```
+
+JSON responses support JMESPath with `response.jmespath(...)`. Selector types are inferred from the
+response `Content-Type`. Parsing uses the original response bytes, honors declared encodings and
+byte order marks, and resolves the first HTML `<base href>` against the response URL.
+
+## Retry policies
+
+Transient download failures are retried automatically with the same policy on the Python and Rust
+crawl engines. By default, SpiderOxide retries download exceptions and HTTP status codes `500`,
+`502`, `503`, `504`, `522`, `524`, `408`, and `429` up to two times.
+
+```python
+from spideroxide import Request
+
+
+request = Request(
+    "https://example.com/api",
+    meta={
+        "max_retry_times": 4,
+        "priority_adjust": -2,
+    },
+)
+```
+
+Set `dont_retry` in request metadata to disable retries for one request. Retried requests preserve
+their callbacks, errbacks, headers, cookies, body, and metadata, bypass duplicate filtering, and
+record `retry/count`, reason-specific counts, and exhaustion stats.
+
+The retry policy is configured with `RETRY_ENABLED`, `RETRY_TIMES`, `RETRY_HTTP_CODES`,
+`RETRY_PRIORITY_ADJUST`, `RETRY_EXCEPTIONS`, and `RETRY_GIVE_UP_LOG_LEVEL`. Spider callbacks and
+middleware can also call `get_retry_request()` to use the same policy for application-level retry
+decisions.
+
+With `ENGINE_BACKEND` set to `rust`, `NativePolicyRuntime` owns status matching, retry counters,
+limit and priority decisions, and raw request, response, and exception statistics. The Python
+middleware preserves Python exception type identity and turns typed native decisions into the
+public Scrapy-compatible request API. Native counter deltas are mirrored into `StatsCollector` so
+extensions can safely contribute to the same statistics.
+
+## Request depth policy
+
+SpiderOxide enables a Scrapy-compatible `DepthMiddleware` by default. Start responses begin at depth
+zero, requests yielded by their callbacks receive depth one, and each later callback increments the
+depth again. The current value is available through `request.meta["depth"]` and
+`response.meta["depth"]`.
+
+Set `DEPTH_LIMIT` to the deepest request SpiderOxide should schedule. Its default value of `0` leaves
+depth unlimited. SpiderOxide subtracts `depth * DEPTH_PRIORITY` from each generated request's
+priority, so a positive value favors shallower requests and a negative value favors deeper requests.
+For example:
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "DEPTH_LIMIT": 4,
+            "DEPTH_PRIORITY": 1,
+            "DEPTH_STATS_VERBOSE": True,
+        },
+    ).crawl()
+)
+```
+
+Accepted child requests update `request_depth_max`. Enabling `DEPTH_STATS_VERBOSE` also records
+`request_depth_count/<depth>` counters. With the Rust engine, `NativeDepthPolicy` owns depth
+increments, limit decisions, arbitrary-size priority adjustments, and native statistics. Python
+only maps each typed decision back to the Scrapy-compatible `Request` object.
+
+## Download slots and AutoThrottle
+
+The Rust engine applies Scrapy-compatible per-domain download slots before each network transfer.
+`CONCURRENT_REQUESTS_PER_DOMAIN` limits simultaneous transfers to one domain, while
+`DOWNLOAD_DELAY` and `RANDOMIZE_DOWNLOAD_DELAY` control the interval between transfer starts.
+Requests can set `download_slot` in metadata to share a slot across domains or separate traffic
+within one domain. `DOWNLOAD_SLOTS` can override `concurrency`, `delay`, and `randomize_delay` for
+individual slot keys.
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "CONCURRENT_REQUESTS_PER_DOMAIN": 4,
+            "DOWNLOAD_DELAY": 0.25,
+            "DOWNLOAD_SLOTS": {
+                "api.example.com": {"concurrency": 2, "delay": 0.5},
+            },
+        },
+    ).crawl()
+)
+```
+
+Enable adaptive delays with `AUTOTHROTTLE_ENABLED`. Rust starts each new slot at the greater of
+`DOWNLOAD_DELAY` and `AUTOTHROTTLE_START_DELAY`, then adjusts its delay from measured network
+latency and `AUTOTHROTTLE_TARGET_CONCURRENCY`. Adjustments stay between `DOWNLOAD_DELAY` and
+`AUTOTHROTTLE_MAX_DELAY`. Fast non-200 responses never reduce the delay. Set
+`autothrottle_dont_adjust_delay` to `True` in request metadata to exclude one response from
+adjustment. `AUTOTHROTTLE_DEBUG` logs the current native slot state after each transfer.
+
+Slot admission, active leases, timing, randomized intervals, adaptive delay decisions, and counters
+remain in Rust. Python derives Scrapy-compatible slot keys, records `download_slot` and
+`download_latency` in request metadata, and mirrors native counter deltas into public crawler stats.
+These settings currently require `ENGINE_BACKEND` to be `rust` or a successful `auto` selection.
+HTTP redirects return to the scheduler as Scrapy-compatible requests, so every redirect hop acquires
+the correct domain slot and observes its concurrency and delay policy.
+
+## Robots policy
+
+Set `ROBOTSTXT_OBEY` to `True` with the Rust engine to enforce robots.txt before downloading a
+request. Rust owns the per-origin policy cache, concurrent fetch deduplication, user-agent matching,
+allow and deny decisions, waiter wakeups, failure state, and counters. Policy matching uses
+Google-compatible longest-rule precedence with wildcard and end-anchor support.
+
+```python
+result = asyncio.run(
+    Crawler(
+        ExampleSpider,
+        settings={
+            "ENGINE_BACKEND": "rust",
+            "ROBOTSTXT_OBEY": True,
+            "ROBOTSTXT_USER_AGENT": "SpiderOxide",
+        },
+    ).crawl()
+)
+```
+
+`ROBOTSTXT_USER_AGENT` overrides request headers for policy matching. Use a bare crawler product
+token for the closest standards-compatible behavior. When it is unset, each request's `User-Agent`
+header is used before falling back to `USER_AGENT`. Set `dont_obey_robotstxt` in request metadata to
+bypass policy for one request.
+
+The first request to an origin starts one `/robots.txt` transfer. Other concurrent requests for that
+origin await the same native policy state. Policy transfers use the configured downloader, retry
+middleware, redirects, native slots, and download statistics. A transfer failure is cached as
+unavailable and fails open, matching Scrapy behavior. Any HTTP response body, including a non-200
+response body, is parsed as policy content.
+
+## Request processing
+
+SpiderOxide accepts any request object with `url`, `method`, `body`, and `priority` attributes.
+
+```python
+from dataclasses import dataclass
+
+from spideroxide import DupeFilter, Scheduler, fingerprint_request
+
+
+@dataclass
+class Request:
+    url: str
+    method: str = "GET"
+    body: bytes = b""
+    priority: int = 0
+
+
+request = Request("https://example.com/products?sort=price", priority=100)
+
+fingerprint = fingerprint_request(request, backend="rust")
+
+dupe_filter = DupeFilter(backend="rust")
+assert dupe_filter.seen_request(request) is False
+assert dupe_filter.seen_request(request) is True
+
+scheduler = Scheduler(backend="rust")
+assert scheduler.push_request(request) is True
+assert scheduler.pop() is request
+```
+
+Fingerprints use Scrapy's deterministic SHA-1 JSON framing over the uppercase method, canonical
+URL, body, and explicitly selected headers. Pass `include_headers=[...]` to include case-insensitive
+request headers or `keep_fragments=True` when fragments identify distinct resources. Native and
+Python duplicate filters and schedulers apply the same contract. A request with
+`meta["verbatim_url"] = True` bypasses URL canonicalization, preserving query order and fragments
+exactly.
+
+Python is the default backend. Set `SCRAPY_RUST_BACKEND` to `rust` to require the native backend,
+or to `auto` to use Rust when it is available and Python otherwise.
+
+```bash
+export SCRAPY_RUST_BACKEND=rust
+```
+
+Explicit Rust selection fails if the extension is unavailable. It does not silently fall back to
+Python. The Python core remains a compatibility fallback and correctness reference while native
+parity and platform wheel coverage mature. The long-term architecture keeps Python as the public
+spider and extension layer while making Rust the required production core.
+
+## Correctness
+
+The validation suite compares:
+
+* Scrapy fingerprint vectors, included headers, fragments, verbatim URLs, and URL edge cases
+* Python and Rust fingerprints byte for byte
+* duplicate filter decisions
+* scheduler insertion decisions
+* complete scheduler output order
+* FIFO behavior at equal priorities
+* FIFO and LIFO crawl queues, start-request precedence, storage precedence, and recovery
+* original request object identity
+* asynchronous spider lifecycle and cleanup
+* middleware and item pipeline behavior
+* callback and errback handling
+* HTTP headers, request serialization, curl, forms, JSON, response subclasses, and following
+* cookie domains, paths, security, expiration, isolated jars, bypasses, and transport parity
+* persistent cache hits, expiration, revalidation, repeated headers, lifecycle, and engine parity
+* native HTTP methods, bodies, repeated headers, and cookies
+* native redirects, compression, streaming, timeouts, and response limits
+* native priority ordering, duplicate decisions, and request identity
+* native concurrency, backpressure, streaming starts, cancellation, and cleanup
+* native job locking, WAL recovery, callbacks, spider state, hard crashes, and schema checks
+* CSS, XPath, XML namespace, JSON, malformed HTML, encoding, and base URL selector behavior
+* item schemas, field metadata, adapters, loaders, processors, nesting, and engine parity
+* retry status codes, exceptions, limits, opt-outs, request overrides, stats, and engine parity
+* native policy ownership, exception inheritance, arbitrary priorities, fallback, and extension stats
+* request depth limits, priority adjustments, verbose stats, arbitrary integers, and engine parity
+* explicit and environment proxies, authentication, redirects, bypass rules, pools, and isolation
+* extension priorities, overrides, factories, opt-outs, async hooks, lifecycle order, and parity
+* scheduler, downloader, streaming, robots, idle, item-error, and partial-download signals
+* JSON, JSON Lines, CSV, XML, Marshal, Pickle, and Python-derived exporter behavior
+* feed fields, encodings, templates, batches, filters, storage, signals, and engine parity
+* local media storage, freshness, checksums, failures, image conversion, thumbnails, and parity
+* stdout, FTP, FTPS, S3, and GCS feed storage plus gzip, bzip2, and LZMA postprocessing
+* handler overrides, disabling, lifecycle, data URIs, local files, FTP, S3, and engine parity
+
+It covers normal and Unicode URLs, mixed case schemes and hosts, query ordering, duplicate query
+parameters, fragments, default ports, request methods, bodies, priorities, and empty schedulers.
+
+Run it with:
+
+```bash
+python tests/run_all.py
+```
+
+The standard validation uses 10,000 deterministic requests with a fixed random seed.
