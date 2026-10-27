@@ -45,3 +45,7 @@ Build the compatibility wheel independently from the repository root:
 ```bash
 python -m pip wheel --no-deps ./compat/scrapy
 ```
+
+The wheel is pure Python, but it requires a matching `spideroxide` version with a native wheel for
+the target platform. See the [distribution support matrix](../../README.md#distribution-support)
+for the CPython/OS targets covered by CI and their validation status.

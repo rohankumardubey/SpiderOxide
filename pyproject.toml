@@ -1,11 +1,11 @@
 [build-system]
-requires = ["maturin>=1.7,<2"]
+requires = ["maturin==1.14.1"]
 build-backend = "maturin"
 
 [project]
 name = "spideroxide"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.15"
 description = "An asynchronous Python crawler framework with optional Rust acceleration"
 readme = "README.md"
 license = "MIT"
@@ -78,11 +78,16 @@ python-source = "src"
 python-packages = ["spideroxide"]
 module-name = "spideroxide._native"
 include = [
+    { path = "LICENSE", format = "sdist" },
     { path = "src/spideroxide/**/*.py", format = ["sdist", "wheel"] },
     { path = "src/spideroxide/py.typed", format = ["sdist", "wheel"] },
     { path = "compat/scrapy/**/*", format = "sdist" },
 ]
 exclude = [
+    { path = "compat/scrapy/**/__pycache__/**", format = "sdist" },
+    { path = "compat/scrapy/**/*.pyc", format = "sdist" },
+    { path = "compat/scrapy/**/*.pyo", format = "sdist" },
+    { path = "compat/scrapy/**/*.egg-info/**", format = "sdist" },
     { path = "Cargo.lock", format = "wheel" },
     { path = "Cargo.toml", format = "wheel" },
     { path = "crates/spideroxide-native/Cargo.toml", format = "wheel" },
@@ -92,6 +97,9 @@ exclude = [
     { path = "src/spideroxide/**/*.pyc", format = "wheel" },
     { path = "src/spideroxide/**/*.pyo", format = "wheel" },
 ]
+
+[tool.maturin.sbom]
+rust = false
 
 [tool.ruff]
 line-length = 100

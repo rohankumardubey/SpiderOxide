@@ -1,14 +1,15 @@
 [build-system]
-requires = ["setuptools>=69"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "spideroxide-scrapy-compat"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.15"
 description = "Scrapy 2.19 import compatibility for SpiderOxide"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
 dependencies = ["spideroxide==0.1.0"]
 classifiers = [
     "Development Status :: 3 - Alpha",
