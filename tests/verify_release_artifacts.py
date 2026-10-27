@@ -8,7 +8,15 @@ import tempfile
 from pathlib import Path
 from zipfile import ZipFile
 
-from release_artifacts import PLATFORMS, ROOT, VERSIONS, _wheel_tag, assemble, tomllib
+from release_artifacts import (
+    PLATFORMS,
+    ROOT,
+    VERSIONS,
+    _wheel_tag,
+    assemble,
+    tomllib,
+    verify_candidate,
+)
 
 VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
 EXTRAS = (
@@ -104,6 +112,26 @@ def main() -> None:
         for line in checksum_lines:
             digest, name = line.split("  ", 1)
             assert hashlib.sha256((output / name).read_bytes()).hexdigest() == digest
+        verify_candidate(output)
+        manifest = output / "SHA256SUMS"
+        original = manifest.read_text(encoding="utf-8")
+        manifest.write_text(original.replace(original[:1], "0" if original[0] != "0" else "1", 1))
+        try:
+            verify_candidate(output)
+        except ValueError as exc:
+            assert "checksums differ" in str(exc)
+        else:
+            raise AssertionError("Tampered checksum manifest was accepted")
+        manifest.write_text(original, encoding="utf-8")
+        extra = output / "unexpected.whl"
+        extra.write_bytes(b"")
+        try:
+            verify_candidate(output)
+        except ValueError as exc:
+            assert "inventory" in str(exc)
+        else:
+            raise AssertionError("Extra release artifact was accepted")
+        extra.unlink()
 
         missing = artifacts / "wheels-windows-2025-py3.10"
         next(missing.glob("spideroxide-*.whl")).unlink()

@@ -1,0 +1,103 @@
+name: Prepare draft release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing version tag (for example, v0.1.0)
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful main-branch CI run for the tagged commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  draft-release:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Check out release tooling and tags
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Verify tag and successful CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$CI_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::CI run ID must be numeric"
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Dispatch the release workflow from main"
+            exit 1
+          fi
+          expected_tag="$(python -c 'import tomllib; from pathlib import Path; print("v" + tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])')"
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "::error::Release tag must match the project version: $expected_tag"
+            exit 1
+          fi
+          if ! git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"; then
+            echo "::error::Release tag does not exist in this repository"
+            exit 1
+          fi
+          tag_sha="$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
+          if ! git merge-base --is-ancestor "$tag_sha" origin/main; then
+            echo "::error::Release tag must point to a main-branch commit"
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > /tmp/release-ci-run.json
+          if ! jq -e --arg sha "$tag_sha" --arg repo "$GITHUB_REPOSITORY" \
+            '.name == "CI" and .event == "push" and .head_branch == "main" and .head_sha == $sha and .conclusion == "success" and .head_repository.full_name == $repo' \
+            /tmp/release-ci-run.json; then
+            echo "::error::CI run must be a successful main-branch push for the tagged commit"
+            exit 1
+          fi
+
+      - name: Download verified release candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ inputs.ci_run_id }}
+        run: gh run download "$CI_RUN_ID" --name release-candidate --dir dist
+
+      - name: Verify complete candidate and checksums
+        run: python tests/release_artifacts.py --verify-candidate dist
+
+      - name: Set up Python for installed-distribution smoke test
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Smoke-test release distributions
+        run: |
+          mkdir smoke-dist
+          cp dist/spideroxide-*-cp310-cp310-manylinux_2_28_x86_64.whl smoke-dist/
+          cp dist/spideroxide_scrapy_compat-*-py3-none-any.whl smoke-dist/
+          python tests/distribution_smoke.py --wheels smoke-dist --sdist dist/spideroxide-*.tar.gz
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: gh release create "$RELEASE_TAG" dist/* --draft --verify-tag --title "$RELEASE_TAG" --generate-notes

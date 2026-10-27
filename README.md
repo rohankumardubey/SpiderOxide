@@ -127,7 +127,15 @@ reproducibility job passed in
 [this CI run](https://github.com/rohankumardubey/SpiderOxide/actions/runs/40504234725).
 When the matrix and source job both pass, CI validates all 25 platform-specific wheel tags and
 contents, then packages the native wheels, one pure-Python shim wheel, source archive, and a
-`SHA256SUMS` manifest as a `release-candidate` artifact. This does not publish a release.
+`SHA256SUMS` manifest as a `release-candidate` artifact. The assembly passed in
+[this CI run](https://github.com/rohankumardubey/SpiderOxide/actions/runs/40508315291).
+This does not publish a release.
+To prepare a release, first create a version tag (for example `v0.1.0`) on the exact commit
+whose **main-branch CI** run produced a successful `release-candidate` artifact. Dispatch
+**Prepare draft release** from `main` with that tag and CI run ID. It checks the tag/commit/run
+match, verifies all 27 artifact checksums and wheel contents, and smoke-tests the installed
+Linux CPython 3.10 wheels before creating a **draft** GitHub release. Review and publish the
+draft separately; the workflow neither creates tags nor publishes releases automatically.
 The Linux CPython 3.14 job also tests removing upstream Scrapy before installing the compatible
 `scrapy` namespace and command; this migration is separate from a previous-release upgrade.
 Manually dispatch CI with `release_tag` to smoke-test the published Linux x86-64 CPython 3.10
