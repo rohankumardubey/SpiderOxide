@@ -3,6 +3,16 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag whose Linux x64 Python 3.10 wheels and sdist should be smoke-tested
+        required: false
+        type: string
+      previous_tag:
+        description: Published release tag whose Linux x64 Python 3.10 wheels should be upgrade-tested
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -128,3 +138,164 @@ jobs:
           cd /tmp
           "$GITHUB_WORKSPACE/.wheel-venv/bin/python" -c \
             "import spideroxide; assert spideroxide.resolve_backend('rust').name == 'rust'"
+
+  distributions:
+    name: Wheel ${{ matrix.python-version }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15-intel, macos-15, windows-2025]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+
+      - name: Build native wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          maturin-version: v1.14.1
+          rust-toolchain: 1.99.0
+          manylinux: "2_28"
+          args: >-
+            --release --locked --compatibility pypi --out dist
+            -i ${{ startsWith(matrix.os, 'ubuntu') && format('python{0}', matrix.python-version) || 'python' }}
+
+      - name: Build Scrapy compatibility wheel
+        run: python -m pip wheel --no-deps --wheel-dir dist ./compat/scrapy
+
+      - name: Smoke-test installed distributions
+        shell: bash
+        run: |
+          python tests/distribution_smoke.py --wheels dist
+          if [[ "${{ matrix.os }}" == "ubuntu-24.04" && "${{ matrix.python-version }}" == "3.14" ]]; then
+            python tests/distribution_smoke.py --wheels dist \
+              --extras twisted remote-control images s3 gcs remote-feeds remote-media dev benchmark \
+              --third-party
+            python tests/distribution_smoke.py --wheels dist --migrate-scrapy
+          fi
+
+      - name: Upload tested wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: dist/*.whl
+          if-no-files-found: error
+
+  source-distribution:
+    name: Reproducible source distribution
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.99.0
+
+      - name: Build source distributions twice
+        run: |
+          python -m pip install "maturin==1.14.1"
+          mkdir -p sdist-first sdist-second dist extracted
+          python -m maturin sdist --out sdist-first
+          python -m maturin sdist --out sdist-second
+          cmp sdist-first/*.tar.gz sdist-second/*.tar.gz
+
+      - name: Verify native wheel reproducibility
+        run: |
+          mkdir -p wheel-first wheel-second
+          python -m maturin build --release --locked --compatibility pypi -i python --out wheel-first
+          python -m maturin build --release --locked --compatibility pypi -i python --out wheel-second
+          cmp wheel-first/*.whl wheel-second/*.whl
+
+      - name: Rebuild wheels from source distribution
+        run: |
+          tar -xzf sdist-first/*.tar.gz -C extracted
+          python -m pip wheel --no-deps --wheel-dir dist sdist-first/*.tar.gz
+          python -m pip wheel --no-deps --wheel-dir dist ./extracted/spideroxide-*/compat/scrapy
+          python tests/distribution_smoke.py --wheels dist --sdist sdist-first/*.tar.gz
+
+      - name: Upload source distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-distribution
+          path: sdist-first/*.tar.gz
+          if-no-files-found: error
+
+  published-release:
+    name: Smoke-test published release
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download published distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          mkdir release-dist
+          gh release download "$RELEASE_TAG" --dir release-dist \
+            --pattern 'spideroxide-*-cp310-cp310-manylinux*_x86_64.whl' \
+            --pattern 'spideroxide_scrapy_compat-*-py3-none-any.whl' \
+            --pattern 'spideroxide-*.tar.gz'
+
+      - name: Smoke-test published distributions
+        run: python tests/distribution_smoke.py --wheels release-dist --sdist release-dist/*.tar.gz
+
+  upgrade:
+    name: Upgrade from published release
+    if: github.event_name == 'workflow_dispatch' && inputs.previous_tag != ''
+    needs: distributions
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Download current wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels-ubuntu-24.04-py3.10
+          path: dist
+
+      - name: Download previous release wheels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        run: |
+          mkdir previous-dist
+          gh release download "$PREVIOUS_TAG" --dir previous-dist \
+            --pattern 'spideroxide-*-cp310-cp310-manylinux*_x86_64.whl' \
+            --pattern 'spideroxide_scrapy_compat-*-py3-none-any.whl'
+
+      - name: Upgrade and smoke-test installed distributions
+        run: python tests/distribution_smoke.py --wheels dist --previous-wheels previous-dist

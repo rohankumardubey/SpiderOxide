@@ -101,7 +101,33 @@ RAG/LLM pipeline, and its Scrapy compatibility is still evolving.
 
 ## Quick start
 
-SpiderOxide requires Python 3.10 or newer, stable Rust, and a native build toolchain.
+SpiderOxide targets GIL-enabled CPython 3.10 through 3.14. Building from source requires stable
+Rust and a native build toolchain; installing a compatible wheel does not.
+
+### Distribution support
+
+| Target | CI wheel build and clean-install crawl | Validation status |
+| --- | --- | --- |
+| Linux x86-64, Linux ARM64 (manylinux 2.28) | CPython 3.10–3.14 | Configured in CI; runner results pending |
+| macOS x86-64, macOS ARM64 (macOS 11+) | CPython 3.10–3.14 | Configured in CI; macOS ARM64 / 3.12 and 3.14 verified locally |
+| Windows x86-64 | CPython 3.10–3.14 | Configured in CI; runner results pending |
+| Windows ARM64 and other architectures | Not built | Not claimed |
+
+Each CI wheel target builds the native and Scrapy-compatibility distributions and checks isolated
+imports, Python/Rust crawls, the `scrapy` executable, and uninstall. A separate Linux job compares
+two source builds and two native wheels byte-for-byte, rebuilds wheels from the source archive,
+and repeats the installed smoke test. CI builds pin maturin and Rust and use `Cargo.lock`;
+maturin's auto-generated Rust SBOM is disabled because its random UUID and build timestamp make
+otherwise identical wheels differ. Optional extras and a separate upstream-Scrapy third-party
+environment (with the pinned certification packages) are exercised on Linux CPython 3.14. All
+optional dependency groups are checked in separate clean environments. These targets are **not
+confirmed supported until their CI jobs pass**.
+The Linux CPython 3.14 job also tests removing upstream Scrapy before installing the compatible
+`scrapy` namespace and command; this migration is separate from a previous-release upgrade.
+Manually dispatch CI with `release_tag` to smoke-test the published Linux x86-64 CPython 3.10
+wheels and source distribution, or with `previous_tag` to upgrade from an earlier published
+release's wheels to the current CI-built wheels. No prior release exists yet, so a real version
+upgrade cannot currently be certified.
 
 From a source checkout:
 
