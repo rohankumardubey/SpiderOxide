@@ -1,6 +1,9 @@
 # SpiderOxide Scrapy compatibility
 
 `spideroxide-scrapy-compat` exposes SpiderOxide through documented Scrapy 2.19 import paths.
+Only the exact Scrapy 2.19.0 API is currently targeted; see the
+[version and deprecation policy](COMPATIBILITY.md#version-and-deprecation-policy) for the release
+matrix, warning guarantees, and migration process.
 Install it instead of the upstream `Scrapy` distribution when running a project on SpiderOxide:
 
 ```bash

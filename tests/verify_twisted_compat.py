@@ -213,7 +213,7 @@ async def _verify_conversions() -> None:
         timeout: defer.Deferred[object] = defer.Deferred()
         try:
             await asyncio.wait_for(maybe_await(timeout), timeout=0.01)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             assert timeout.called
         else:
             raise AssertionError("Timed-out Deferred was not cancelled")

@@ -108,9 +108,10 @@ Rust and a native build toolchain; installing a compatible wheel does not.
 
 | Target | CI wheel build and clean-install crawl | Validation status |
 | --- | --- | --- |
-| Linux x86-64, Linux ARM64 (manylinux 2.28) | CPython 3.10–3.14 | Configured in CI; runner results pending |
-| macOS x86-64, macOS ARM64 (macOS 11+) | CPython 3.10–3.14 | Configured in CI; macOS ARM64 / 3.12 and 3.14 verified locally |
-| Windows x86-64 | CPython 3.10–3.14 | Configured in CI; runner results pending |
+| Linux x86-64, Linux ARM64 (manylinux 2.28) | CPython 3.10–3.14 | All 10 targets passed CI |
+| macOS ARM64 (macOS 11+) | CPython 3.10–3.14 | All five targets passed CI |
+| macOS x86-64 (macOS 11+) | CPython 3.10–3.14 | 3.11–3.14 passed CI; 3.10 needs a retest after the install-path check fix |
+| Windows x86-64 | CPython 3.10–3.14 | Wheels built; all five smoke checks need a retest after the install-path check fix |
 | Windows ARM64 and other architectures | Not built | Not claimed |
 
 Each CI wheel target builds the native and Scrapy-compatibility distributions and checks isolated
@@ -121,7 +122,11 @@ maturin's auto-generated Rust SBOM is disabled because its random UUID and build
 otherwise identical wheels differ. Optional extras and a separate upstream-Scrapy third-party
 environment (with the pinned certification packages) are exercised on Linux CPython 3.14. All
 optional dependency groups are checked in separate clean environments. These targets are **not
-confirmed supported until their CI jobs pass**.
+confirmed supported until their CI jobs pass**. Results above refer to
+[this CI run](https://github.com/rohankumardubey/SpiderOxide/actions/runs/40477039739);
+the source-distribution reproducibility job also passed. The first run exposed a path comparison
+error in the installed-wheel smoke test on Windows and macOS x86-64 / Python 3.10; those targets
+remain unverified until the corrected check passes in CI.
 The Linux CPython 3.14 job also tests removing upstream Scrapy before installing the compatible
 `scrapy` namespace and command; this migration is separate from a previous-release upgrade.
 Manually dispatch CI with `release_tag` to smoke-test the published Linux x86-64 CPython 3.10

@@ -105,7 +105,9 @@ from scrapy.crawler import Crawler
 
 assert scrapy.__version__ == "2.19.0"
 assert version("spideroxide-scrapy-compat") == version("spideroxide")
-assert Path(spideroxide.__file__).resolve().is_relative_to(Path(__import__("sys").prefix))
+assert Path(spideroxide.__file__).resolve().is_relative_to(
+    Path(__import__("sys").prefix).resolve()
+)
 try:
     version("Scrapy")
 except PackageNotFoundError:

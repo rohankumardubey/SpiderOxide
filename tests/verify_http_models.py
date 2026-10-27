@@ -23,6 +23,7 @@ from spideroxide import (
     XmlResponse,
 )
 from spideroxide.downloader import _response
+from spideroxide.exceptions import ScrapyDeprecationWarning
 
 
 def _callback(response: Response) -> None:
@@ -295,13 +296,18 @@ def _verify_form_response() -> None:
             </form>
         """,
     )
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", ScrapyDeprecationWarning)
         request = FormRequest.from_response(
             html,
             formid="login",
             formdata={"user": "new", "remove": None},
         )
+    assert len(caught) == 1
+    assert caught[0].category is ScrapyDeprecationWarning
+    assert str(caught[0].message) == (
+        "FormRequest.from_response() is deprecated. Use the form2request library instead."
+    )
     assert request.url == "https://base.example.test/forms/submit"
     assert request.method == "POST"
     assert request.body == b"remember=on&role=admin&note=hello&go=yes&user=new"

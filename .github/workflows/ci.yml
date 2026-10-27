@@ -95,6 +95,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          .venv/bin/python tests/verify_compat_version.py
           .venv/bin/python conformance/audit.py
           .venv/bin/python conformance/run.py \
             --output-dir conformance-results/python-${{ matrix.python-version }}
