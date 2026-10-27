@@ -110,8 +110,8 @@ Rust and a native build toolchain; installing a compatible wheel does not.
 | --- | --- | --- |
 | Linux x86-64, Linux ARM64 (manylinux 2.28) | CPython 3.10–3.14 | All 10 targets passed CI |
 | macOS ARM64 (macOS 11+) | CPython 3.10–3.14 | All five targets passed CI |
-| macOS x86-64 (macOS 11+) | CPython 3.10–3.14 | 3.11–3.14 passed CI; 3.10 needs a retest after the install-path check fix |
-| Windows x86-64 | CPython 3.10–3.14 | Wheels built; all five smoke checks need a retest after the install-path check fix |
+| macOS x86-64 (macOS 11+) | CPython 3.10–3.14 | All five targets passed CI |
+| Windows x86-64 | CPython 3.10–3.14 | All five targets passed CI |
 | Windows ARM64 and other architectures | Not built | Not claimed |
 
 Each CI wheel target builds the native and Scrapy-compatibility distributions and checks isolated
@@ -122,11 +122,12 @@ maturin's auto-generated Rust SBOM is disabled because its random UUID and build
 otherwise identical wheels differ. Optional extras and a separate upstream-Scrapy third-party
 environment (with the pinned certification packages) are exercised on Linux CPython 3.14. All
 optional dependency groups are checked in separate clean environments. These targets are **not
-confirmed supported until their CI jobs pass**. Results above refer to
-[this CI run](https://github.com/rohankumardubey/SpiderOxide/actions/runs/40477039739);
-the source-distribution reproducibility job also passed. The first run exposed a path comparison
-error in the installed-wheel smoke test on Windows and macOS x86-64 / Python 3.10; those targets
-remain unverified until the corrected check passes in CI.
+confirmed supported until their CI jobs pass**. All 25 targets and the source-distribution
+reproducibility job passed in
+[this CI run](https://github.com/rohankumardubey/SpiderOxide/actions/runs/40504234725).
+When the matrix and source job both pass, CI validates all 25 platform-specific wheel tags and
+contents, then packages the native wheels, one pure-Python shim wheel, source archive, and a
+`SHA256SUMS` manifest as a `release-candidate` artifact. This does not publish a release.
 The Linux CPython 3.14 job also tests removing upstream Scrapy before installing the compatible
 `scrapy` namespace and command; this migration is separate from a previous-release upgrade.
 Manually dispatch CI with `release_tag` to smoke-test the published Linux x86-64 CPython 3.10

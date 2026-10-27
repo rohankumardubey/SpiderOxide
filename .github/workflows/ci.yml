@@ -241,6 +241,43 @@ jobs:
           path: sdist-first/*.tar.gz
           if-no-files-found: error
 
+  release-candidate:
+    name: Assemble verified release candidate
+    needs: [distributions, source-distribution]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Download tested artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: release-artifacts
+
+      - name: Download source distribution
+        uses: actions/download-artifact@v4
+        with:
+          name: source-distribution
+          path: release-artifacts/source-distribution
+
+      - name: Verify matrix and assemble release candidate
+        run: |
+          python tests/verify_release_artifacts.py
+          python tests/release_artifacts.py --artifacts release-artifacts --out dist
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-candidate
+          path: dist/
+          if-no-files-found: error
+
   published-release:
     name: Smoke-test published release
     if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
