@@ -250,7 +250,7 @@
         "tests/test_extension_throttle.py",
         "tests/test_utils_remote_control.py"
       ],
-      "rationale": "Remote-control and remaining extension interfaces are tracked by issue #48."
+      "rationale": "Upstream tests assume Scrapy's default-enabled control interfaces; SpiderOxide tests its opt-in authenticated loopback Telnet and HTTP controls on both engines in tests/verify_telnet_console.py and tests/verify_control_interfaces.py."
     },
     {
       "id": "third-party-integrations",
@@ -277,7 +277,7 @@
         "tests/test_utils_reactorless.py",
         "tests/test_utils_signal.py"
       ],
-      "rationale": "Twisted Deferred and reactor compatibility is tracked by issue #50; SpiderOxide's asyncio behavior is covered separately."
+      "rationale": "SpiderOxide supports an opt-in asyncio reactor and Deferred bridge, tested on both engines in tests/verify_twisted_compat.py; non-asyncio reactors and Twisted's global reactor lifecycle remain unsupported."
     },
     {
       "id": "version-deprecations",

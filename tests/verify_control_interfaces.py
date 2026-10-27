@@ -242,7 +242,7 @@ async def main() -> None:
     crawler = Crawler(ControlSpider, {"TELNETCONSOLE_ENABLED": True})
     try:
         TelnetConsole.from_crawler(crawler)
-    except NotConfigured as error:
+    except RuntimeError as error:
         assert "Twisted reactor" in str(error)
     else:
         raise AssertionError("TelnetConsole must not bind unauthenticated")

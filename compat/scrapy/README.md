@@ -30,6 +30,8 @@ For Deferred-returning middleware, pipelines, handlers, callbacks, and signals, 
 `TWISTED_REACTOR="twisted.internet.asyncioreactor.AsyncioSelectorReactor"` before crawling.
 The asyncio reactor must be installed on the current event loop; other reactors are rejected.
 See [compatibility boundaries](COMPATIBILITY.md#opt-in-twisted-bridge) before enabling it.
+An opt-in Twisted Conch Telnet console is also available on loopback with authenticated
+credentials; see the [security notes](COMPATIBILITY.md#local-control).
 
 ```bash
 scrapy startproject example
