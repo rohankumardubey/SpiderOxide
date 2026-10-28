@@ -397,7 +397,7 @@ async def _verify_signal_helpers() -> None:
     waiter = asyncio.create_task(manager.wait_for("ready"))
     await asyncio.sleep(0)
     assert not waiter.done()
-    await manager.send_catch_log("ready", dont_log=ValueError)
+    await manager.send("ready", dont_log=ValueError)
     await asyncio.wait_for(waiter, 1)
     assert manager._receivers["ready"] == [good, bad]
 
@@ -432,6 +432,7 @@ async def _verify_signal_helpers() -> None:
     marker = object()
     manager.connect(scoped, marker)
     assert manager.send_sync(marker, value=4) == [(scoped, 5)]
+    assert manager.send_catch_log(marker, value=4) == [(scoped, 5)]
     assert payload[-1] == (marker, manager.sender, 4)
     assert manager.disconnect(scoped, marker)
 
@@ -492,6 +493,40 @@ async def _verify_signal_helpers() -> None:
     assert isinstance(responses[0][1], signals.SignalFailure)
     assert isinstance(async_responses[0][1], StopDownload)
     logged.assert_not_called()
+    from twisted.python.failure import Failure
+
+    with patch("spideroxide.signals.logger.exception") as logged:
+        scrapy_responses = manager.send_catch_log("stopped")
+    assert scrapy_responses[0][0] is stopped
+    assert isinstance(scrapy_responses[0][1], Failure)
+    assert isinstance(scrapy_responses[0][1].value, StopDownload)
+    logged.assert_not_called()
+
+    def broken(value: int) -> None:
+        raise ValueError(f"failure {value}")
+
+    manager.connect(broken, "scrapy-sync")
+    manager.connect(scoped, "scrapy-sync")
+    with patch("spideroxide.signals.logger.exception") as logged:
+        scrapy_responses = manager.send_catch_log("scrapy-sync", value=7)
+    assert scrapy_responses[0][0] is broken
+    assert isinstance(scrapy_responses[0][1], Failure)
+    assert scrapy_responses[0][1].type is ValueError
+    assert str(scrapy_responses[0][1].value) == "failure 7"
+    assert scrapy_responses[1] == (scoped, 8)
+    logged.assert_called_once()
+
+    returned = signals.SignalFailure(ValueError("returned, not raised"))
+    manager.connect(lambda: returned, "returned")
+    assert manager.send_catch_log("returned")[0][1] is returned
+
+    with patch.dict(sys.modules, {"twisted.python.failure": None}):
+        try:
+            manager.send_catch_log("scrapy-sync", dont_log=ValueError, value=7)
+        except RuntimeError as error:
+            assert "spideroxide[twisted]" in str(error)
+        else:
+            raise AssertionError("Scrapy-style failures without Twisted should fail explicitly")
 
     async def unexpected_async() -> None:
         return None

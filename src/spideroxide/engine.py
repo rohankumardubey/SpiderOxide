@@ -157,7 +157,7 @@ class CrawlEngine:
                         await self._process_outputs(batch.outputs, response=batch.response)
 
                 self._scheduler_wakeup.clear()
-                idle_responses = await self.signals.send_catch_log(
+                idle_responses = await self.signals.send(
                     signals.spider_idle,
                     dont_log=(DontCloseSpider, CloseSpider),
                     spider=self.spider,
@@ -751,7 +751,7 @@ class NativeCrawlEngine(CrawlEngine):
                     close_waiter.result()
                 await crawl_waiter
                 self._scheduler_wakeup.clear()
-                idle_responses = await self.signals.send_catch_log(
+                idle_responses = await self.signals.send(
                     signals.spider_idle,
                     dont_log=(DontCloseSpider, CloseSpider),
                     spider=self.spider,
