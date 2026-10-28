@@ -100,6 +100,12 @@ jobs:
           .venv/bin/python conformance/run.py \
             --output-dir conformance-results/python-${{ matrix.python-version }}
 
+      - name: Smoke-test full-crawl benchmark
+        run: |
+          .venv/bin/python benchmarks/benchmark_full_crawl.py \
+            --pages 5 --warmups 0 --runs 1 \
+            --output /tmp/spideroxide-full-crawl.json
+
       - name: Upload Scrapy conformance report
         if: always()
         uses: actions/upload-artifact@v4
