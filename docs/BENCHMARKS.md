@@ -4,6 +4,30 @@
 
 ## Benchmarks
 
+### Full-crawl comparison
+
+The full-crawl harness runs upstream Scrapy 2.19.0 and SpiderOxide's Python and Rust engines
+against the same deterministic loopback HTTP server. Each run fetches distinct HTML pages,
+parses a title, yields an item, and verifies all items, crawl completion, and the number of
+requests served. Crawlers run in separate processes to isolate Scrapy's Twisted reactor from
+SpiderOxide's asyncio runtime; the timed region spans crawler construction through completion,
+excluding Python imports and fixture-server startup.
+
+From a source checkout with the native extension built, install the pinned upstream baseline in
+an environment **without** `spideroxide-scrapy-compat` and run:
+
+```bash
+python -m pip install -r requirements-conformance.txt
+python benchmarks/benchmark_full_crawl.py --pages 100 --warmups 1 --runs 3 \
+  --output /tmp/spideroxide-full-crawl.json
+```
+
+The JSON output records versions, platform, concurrency, per-run nanosecond samples, and median
+crawl times for all three engines. Engine order rotates between runs. The CI smoke test uses five
+pages and one measured run to verify behavior, **not** to claim a performance advantage.
+Loopback throughput and short crawls are sensitive to machine load, process setup, and connection
+behavior; use representative workloads before drawing production performance conclusions.
+
 ### SpiderOxide compared with Scrapy
 
 SpiderOxide was compared with Scrapy 2.17.0 using real Scrapy requests,

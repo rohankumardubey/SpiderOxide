@@ -115,7 +115,8 @@ In a measured **100,000-request component workload**, the Rust combined schedule
 **15.81x faster** than Scrapy 2.17.0. That result excludes networking, parsing, middleware, and
 complete crawls; it is **not** a whole-crawler speedup claim. See
 [benchmark methodology and results](docs/BENCHMARKS.md) for the environment, raw data, and
-reproduction commands.
+reproduction commands. A separate [full-crawl harness](docs/BENCHMARKS.md#full-crawl-comparison)
+compares complete crawls on a deterministic local HTTP workload without a published speedup claim.
 
 ## Documentation
 
