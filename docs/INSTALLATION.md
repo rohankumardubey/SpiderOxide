@@ -42,6 +42,9 @@ release's wheels in a clean environment and upgrades to the candidate before cre
 GitHub release. For the first release, this upgrade test is skipped; a real previous-version
 upgrade cannot be certified until there is an earlier published release. Review and publish the
 draft separately; the workflow neither creates tags nor publishes releases automatically.
+Publishing a release triggers a separate CI check that downloads the published assets, validates
+the complete 25-wheel inventory and `SHA256SUMS`, and smoke-tests the installed Linux CPython
+3.10 distributions. This verifies publication but does not publish or modify release assets.
 The Linux CPython 3.14 job also tests removing upstream Scrapy before installing the compatible
 `scrapy` namespace and command; this migration is separate from a previous-release upgrade.
 Manually dispatch CI with `release_tag` to smoke-test the published Linux x86-64 CPython 3.10
