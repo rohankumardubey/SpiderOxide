@@ -208,10 +208,13 @@ The public Scrapy-named download exceptions inherit directly from `Exception`, a
 SpiderOxide's additional `DownloadError` is a separate native exception; catching it alone does
 not catch the Scrapy-named exceptions. The downloader and HTTP cache handle both families.
 
-SpiderOxide's native `SignalManager.send_catch_log()` is asynchronous and returns native failure
-records, whereas Scrapy's synchronous dispatcher returns Twisted `Failure` instances.
-`send_catch_log_async()` supports concurrent asynchronous handlers, including Deferred results
-with opt-in. Synchronous Scrapy-style signal dispatch and Twisted `Failure` results remain gaps.
+`SignalManager.send_catch_log()` dispatches synchronous handlers immediately and returns Twisted
+`Failure` records for exceptions when `spideroxide[twisted]` is installed. Without Twisted, handler
+errors in this Scrapy-compatible method raise a clear dependency error; use `send_sync()` for
+native `SignalFailure` records without Twisted. The asyncio-native `send()` remains awaitable,
+and `send_catch_log_async()` supports concurrent asynchronous handlers, including Deferred
+results with opt-in. Synchronous handlers returning an awaitable are rejected rather than
+waiting on an event loop; Scrapy 2.19 logs an error and returns the Deferred in that case.
 
 SpiderOxide additionally exposes `scrapy.services.ServiceManager`, the `SERVICES` setting, and
 `Crawler.get_service()` for dependency-ordered crawler services with synchronous or asynchronous

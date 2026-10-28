@@ -71,6 +71,16 @@ def _ignored_exceptions(
     return (dont_log, StopDownload)
 
 
+def _twisted_failure(error: Exception) -> object:
+    try:
+        from twisted.python.failure import Failure
+    except ImportError as missing:
+        raise RuntimeError(
+            "Scrapy-style synchronous signal failures require spideroxide[twisted]"
+        ) from missing
+    return Failure(error, type(error), error.__traceback__)
+
+
 class SignalManager:
     def __init__(self, sender: object | None = None) -> None:
         self.sender = self if sender is None else sender
@@ -195,9 +205,9 @@ class SignalManager:
     async def send(
         self, signal: object, **kwargs: object
     ) -> list[tuple[Callable[..., object], object | SignalFailure]]:
-        return await self.send_catch_log(signal, **kwargs)
+        return await self._send_catch_log_awaitable(signal, **kwargs)
 
-    async def send_catch_log(
+    async def _send_catch_log_awaitable(
         self,
         signal: object,
         *,
@@ -223,6 +233,18 @@ class SignalManager:
                 response = SignalFailure(error)
             responses.append((receiver, response))
         return responses
+
+    def send_catch_log(
+        self,
+        signal: object,
+        *,
+        dont_log: type[BaseException] | Sequence[type[BaseException]] | None = (),
+        sender: object | None = None,
+        **kwargs: object,
+    ) -> list[tuple[Callable[..., object], object]]:
+        return self._send_sync(
+            signal, dont_log=dont_log, sender=sender, failure=_twisted_failure, **kwargs
+        )
 
     async def send_catch_log_async(
         self,
@@ -261,10 +283,23 @@ class SignalManager:
         sender: object | None = None,
         **kwargs: object,
     ) -> list[tuple[Callable[..., object], object | SignalFailure]]:
+        return self._send_sync(
+            signal, dont_log=dont_log, sender=sender, failure=SignalFailure, **kwargs
+        )
+
+    def _send_sync(
+        self,
+        signal: object,
+        *,
+        dont_log: type[BaseException] | Sequence[type[BaseException]] | None,
+        sender: object | None,
+        failure: Callable[[Exception], object],
+        **kwargs: object,
+    ) -> list[tuple[Callable[..., object], object]]:
         actual_sender = self.sender if sender is None else sender
         named = {**kwargs, "signal": signal, "sender": actual_sender}
         ignored = _ignored_exceptions(dont_log)
-        responses: list[tuple[Callable[..., object], object | SignalFailure]] = []
+        responses: list[tuple[Callable[..., object], object]] = []
         for receiver in self._matching_receivers(signal, actual_sender):
             try:
                 response = receiver(**_accepted_kwargs(receiver, named))
@@ -279,6 +314,6 @@ class SignalManager:
                         "Error caught on signal handler: %s",
                         receiver,
                     )
-                response = SignalFailure(error)
+                response = failure(error)
             responses.append((receiver, response))
         return responses
