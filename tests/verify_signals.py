@@ -528,10 +528,33 @@ async def _verify_signal_helpers() -> None:
         else:
             raise AssertionError("Scrapy-style failures without Twisted should fail explicitly")
 
+    from twisted.internet.defer import Deferred
+
+    pending: Deferred[object] = Deferred()
+
+    def deferred_receiver() -> Deferred[object]:
+        return pending
+
+    manager.connect(deferred_receiver, "deferred")
+    with patch("spideroxide.signals.logger.error") as logged:
+        deferred_responses = manager.send_catch_log("deferred")
+    assert deferred_responses == [(deferred_receiver, pending)]
+    logged.assert_called_once()
+    assert "Cannot return deferreds" in logged.call_args.args[0]
+    with patch("spideroxide.signals.logger.exception") as logged:
+        native_responses = manager.send_sync("deferred")
+    assert isinstance(native_responses[0][1], signals.SignalFailure)
+    assert isinstance(native_responses[0][1].exception, TypeError)
+    logged.assert_called_once()
+
     async def unexpected_async() -> None:
         return None
 
     manager.connect(unexpected_async, "sync-only")
+    coroutine_responses = manager.send_catch_log("sync-only")
+    assert coroutine_responses[0][0] is unexpected_async
+    assert asyncio.iscoroutine(coroutine_responses[0][1])
+    coroutine_responses[0][1].close()
     with patch("spideroxide.signals.logger.exception"):
         sync_responses = manager.send_sync("sync-only")
     assert isinstance(sync_responses[0][1], signals.SignalFailure)
