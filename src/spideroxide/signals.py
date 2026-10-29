@@ -9,6 +9,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from .exceptions import StopDownload
+from .twisted_compat import is_deferred
 from .utils import maybe_await
 
 logger = logging.getLogger(__name__)
@@ -243,7 +244,12 @@ class SignalManager:
         **kwargs: object,
     ) -> list[tuple[Callable[..., object], object]]:
         return self._send_sync(
-            signal, dont_log=dont_log, sender=sender, failure=_twisted_failure, **kwargs
+            signal,
+            dont_log=dont_log,
+            sender=sender,
+            failure=_twisted_failure,
+            allow_awaitables=True,
+            **kwargs,
         )
 
     async def send_catch_log_async(
@@ -294,6 +300,7 @@ class SignalManager:
         dont_log: type[BaseException] | Sequence[type[BaseException]] | None,
         sender: object | None,
         failure: Callable[[Exception], object],
+        allow_awaitables: bool = False,
         **kwargs: object,
     ) -> list[tuple[Callable[..., object], object]]:
         actual_sender = self.sender if sender is None else sender
@@ -303,7 +310,13 @@ class SignalManager:
         for receiver in self._matching_receivers(signal, actual_sender):
             try:
                 response = receiver(**_accepted_kwargs(receiver, named))
-                if inspect.isawaitable(response):
+                if allow_awaitables and is_deferred(response):
+                    logger.error(
+                        "Cannot return deferreds from signal handler: %(receiver)s",
+                        {"receiver": receiver},
+                        extra={"spider": kwargs.get("spider")},
+                    )
+                elif not allow_awaitables and inspect.isawaitable(response):
                     close = getattr(response, "close", None)
                     if close is not None:
                         close()
