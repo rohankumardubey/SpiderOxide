@@ -700,11 +700,13 @@ record. `DEFAULT_DROPITEM_LOG_LEVEL` is `WARNING`; individual `DropItem` excepti
 `log_level` to override it. The Python and Rust crawl engines use the same formatter.
 
 The deprecated `scrapy.mail.MailSender` import remains available with a
-`ScrapyDeprecationWarning`. SpiderOxide sends SMTP mail without a Twisted reactor using
-`spideroxide.mail.MailSender`; its `send()` method schedules delivery as an `asyncio.Task`
-instead of returning a Deferred. Await that task to observe failures and ensure delivery before
-the event loop closes. `MAIL_HOST`, `MAIL_FROM`, `MAIL_USER`, `MAIL_PASS`, `MAIL_PORT`, `MAIL_TLS`,
-and `MAIL_SSL` configure the sender. SMTP TLS validates server certificates and hostnames.
+`ScrapyDeprecationWarning`. Its `send()` method returns a Twisted `Deferred` for live delivery
+on a running asyncio loop when Twisted is installed; debug mode returns `None`. Native
+`spideroxide.mail.MailSender` needs no Twisted reactor and returns an `asyncio.Task` for live
+delivery instead. Await the task (or convert the Deferred to a Future) to observe failures and
+ensure delivery before the event loop closes. `MAIL_HOST`, `MAIL_FROM`, `MAIL_USER`, `MAIL_PASS`,
+`MAIL_PORT`, `MAIL_TLS`, and `MAIL_SSL` configure the sender. SMTP TLS validates server
+certificates and hostnames.
 
 ## Extensions
 
