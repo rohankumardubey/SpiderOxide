@@ -108,8 +108,8 @@ format migration.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Non-asyncio reactors, full Twisted protocol internals, synchronous Scrapy signal-dispatch
-  `Failure` results, and Deferred-returning mail
+- Non-asyncio reactors, full Twisted protocol internals, and synchronous Scrapy signal-dispatch
+  `Failure` results
 - Third-party components beyond the tested certification boundaries
 
 APIs not exported by the shim fail to import instead of returning placeholders. The native
@@ -199,10 +199,13 @@ Completed crawler and runner tasks resolve to SpiderOxide's `CrawlResult` instea
 `None`. Code that only awaits crawl completion is unchanged; callers may additionally inspect
 items, statistics, and the close reason.
 
-`MailSender.send()` schedules delivery and returns an `asyncio.Task` instead of a Twisted
-`Deferred`. Await the task when the result matters; debug mode returns `None`. SMTP TLS uses
-verified certificates, unlike Scrapy's permissive legacy TLS context. Twisted reactor logging
-bridges and the full Deferred utility surface remain outside this subset.
+`scrapy.mail.MailSender.send()` returns a Twisted `Deferred` for live delivery on a running
+asyncio loop when Twisted is installed; its callback resolves to `None`, and failures propagate
+through its errback. Debug mode returns `None` without requiring Twisted. The native
+`spideroxide.mail.MailSender.send()` still returns an `asyncio.Task` (or `None` in debug mode).
+Unlike Scrapy, non-debug sends need a running asyncio loop even when a Twisted reactor is
+installed. SMTP TLS uses verified certificates, unlike Scrapy's permissive legacy TLS context.
+Twisted reactor logging bridges and the full Deferred utility surface remain outside this subset.
 
 The public Scrapy-named download exceptions inherit directly from `Exception`, as in Scrapy 2.19.
 SpiderOxide's additional `DownloadError` is a separate native exception; catching it alone does
