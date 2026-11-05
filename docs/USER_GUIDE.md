@@ -708,6 +708,10 @@ ensure delivery before the event loop closes. `MAIL_HOST`, `MAIL_FROM`, `MAIL_US
 `MAIL_PORT`, `MAIL_TLS`, and `MAIL_SSL` configure the sender. SMTP TLS validates server
 certificates and hostnames.
 
+Calling `scrapy.utils.log.configure_logging()` also forwards Twisted log events to Python's
+`twisted` logger when Twisted is installed. Native `spideroxide.logutils.configure_logging()`
+does not install a Twisted observer.
+
 ## Extensions
 
 Extensions are configured through the Scrapy-compatible `EXTENSIONS` setting. Values are numeric

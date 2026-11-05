@@ -9,6 +9,7 @@ import xmlrpc.client
 from collections.abc import AsyncIterable, Iterable, Mapping
 from configparser import ConfigParser
 from importlib.machinery import ModuleSpec
+from importlib.util import find_spec
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Protocol
@@ -126,6 +127,22 @@ from spideroxide.twisted_compat import (
 )
 
 logger = logging.getLogger("scrapy.utils.spider")
+_twisted_log_observer: object | None = None
+
+
+def _configure_scrapy_logging(
+    settings: Settings | dict[str, Any] | None = None,
+    install_root_handler: bool | None = None,
+) -> None:
+    global _twisted_log_observer
+
+    configure_logging(settings, install_root_handler)
+    if find_spec("twisted") is not None and _twisted_log_observer is None:
+        from twisted.python import log as twisted_log
+
+        observer = twisted_log.PythonLoggingObserver("twisted")
+        observer.start()
+        _twisted_log_observer = observer
 
 
 class ScrapyWarning(Warning):
@@ -1198,7 +1215,7 @@ def install() -> None:
             "SpiderLoggerAdapter": SpiderLoggerAdapter,
             "StreamLogger": StreamLogger,
             "TopLevelFormatter": TopLevelFormatter,
-            "configure_logging": configure_logging,
+            "configure_logging": _configure_scrapy_logging,
             "get_scrapy_root_handler": get_scrapy_root_handler,
             "install_scrapy_root_handler": install_scrapy_root_handler,
             "log_scrapy_info": log_scrapy_info,
