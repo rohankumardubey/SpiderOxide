@@ -108,8 +108,7 @@ format migration.
 
 The shim intentionally omits public APIs that SpiderOxide has not implemented yet:
 
-- Non-asyncio reactors, full Twisted protocol internals, and synchronous Scrapy signal-dispatch
-  `Failure` results
+- Non-asyncio reactors and full Twisted protocol internals
 - Third-party components beyond the tested certification boundaries
 
 APIs not exported by the shim fail to import instead of returning placeholders. The native
@@ -205,7 +204,7 @@ through its errback. Debug mode returns `None` without requiring Twisted. The na
 `spideroxide.mail.MailSender.send()` still returns an `asyncio.Task` (or `None` in debug mode).
 Unlike Scrapy, non-debug sends need a running asyncio loop even when a Twisted reactor is
 installed. SMTP TLS uses verified certificates, unlike Scrapy's permissive legacy TLS context.
-Twisted reactor logging bridges and the full Deferred utility surface remain outside this subset.
+The full Deferred utility surface remains outside this subset.
 
 The public Scrapy-named download exceptions inherit directly from `Exception`, as in Scrapy 2.19.
 SpiderOxide's additional `DownloadError` is a separate native exception; catching it alone does
@@ -218,6 +217,11 @@ native `SignalFailure` records without Twisted. The asyncio-native `send()` rema
 and `send_catch_log_async()` supports concurrent asynchronous handlers, including Deferred
 results with opt-in. Like Scrapy 2.19, `send_catch_log()` logs a handler-returned Deferred and
 returns it unchanged without awaiting it; native `send_sync()` rejects asynchronous handlers.
+
+`scrapy.utils.log.configure_logging()` bridges Twisted log events to Python's `twisted` logger
+when Twisted is installed, without registering duplicate observers on repeated calls. Native
+`spideroxide.logutils.configure_logging()` does not install this bridge; native-only logging
+does not require Twisted.
 
 SpiderOxide additionally exposes `scrapy.services.ServiceManager`, the `SERVICES` setting, and
 `Crawler.get_service()` for dependency-ordered crawler services with synchronous or asynchronous
